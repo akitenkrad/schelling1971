@@ -21,11 +21,11 @@ cargo run --release
 cargo run --release -- --rows 20 --cols 20 --threshold 0.5 --seed 42
 
 # 可視化 (シミュレーション実行後)
-pip install -r analysis/requirements.txt
-python analysis/visualize.py
+uv sync
+uv run python analysis/visualize.py
 
 # アニメーションなしで高速可視化
-python analysis/visualize.py --no_animation
+uv run python analysis/visualize.py --no_animation
 ```
 
 ## Testing & Linting

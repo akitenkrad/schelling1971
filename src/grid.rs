@@ -72,7 +72,7 @@ impl Grid {
         }
         let same = occupied
             .iter()
-            .filter(|&&(nr, nc)| self.cells[nr][nc] == agent)
+            .filter(|&&(nr, nc)| self.cells[*nr][*nc] == agent)
             .count();
         same as f64 / occupied.len() as f64
     }
@@ -120,13 +120,5 @@ impl Grid {
         let dr = (a.0 as i32 - b.0 as i32).unsigned_abs() as usize;
         let dc = (a.1 as i32 - b.1 as i32).unsigned_abs() as usize;
         dr.max(dc)
-    }
-
-    /// グリッドの状態を行列 (Vec<Vec<u8>>) として返す (可視化用)
-    pub fn to_matrix(&self) -> Vec<Vec<u8>> {
-        self.cells
-            .iter()
-            .map(|row| row.iter().map(|c| c.to_int()).collect())
-            .collect()
     }
 }
