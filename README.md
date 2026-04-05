@@ -127,7 +127,7 @@ uv run python analysis/visualize.py --no_animation
 uv run python analysis/visualize.py --results_dir results/20260405_153000
 ```
 
-**出力ファイル:**
+**出力ファイル（単一実行）:**
 
 ```
 results/latest/figures/
@@ -137,6 +137,31 @@ results/latest/figures/
 ├── comparison.png         ← 初期・中間・最終の3ショット比較
 └── metrics_timeseries.png ← メトリクス時系列グラフ
 ```
+
+#### スイープ結果の可視化
+
+`visualize_sweep.py` はスイープ結果（`sweep_summary.csv`）を読み込み，パラメータと最終メトリクスの関係を可視化する．1Dスイープ（1パラメータのみ変化）と2Dスイープ（2パラメータが変化）を自動判別する．
+
+```bash
+# 最新のスイープ結果を可視化（results/latest 経由）
+uv run python analysis/visualize_sweep.py
+
+# 特定のスイープ結果を指定
+uv run python analysis/visualize_sweep.py --sweep_dir results/20260405_161446_sweep
+```
+
+**出力ファイル（スイープ）:**
+
+```
+results/latest/figures/
+├── sweep_avg_same_ratio.png  ← 平均同色近隣比率（1D: 折れ線+エラーバー / 2D: ヒートマップ）
+├── sweep_pct_no_opposite.png ← 異色近隣なし割合
+├── sweep_convergence.png     ← 収束ステップ数
+└── sweep_overview.png        ← 4指標の概要パネル（2×2）
+```
+
+- **1Dスイープ**: 折れ線グラフ．複数シードの場合は平均線＋標準偏差のエラーバー＋個別点をプロット
+- **2Dスイープ**: ヒートマップ．セル内に数値をアノテーション
 
 ---
 
@@ -166,6 +191,15 @@ results/latest/figures/
 | `comparison.png` | 初期・中間・最終の3ショット比較 | 分離の進行過程を概観．初期のランダム配置から徐々にクラスターが成長する様子を確認 |
 | `metrics_timeseries.png` | メトリクス時系列（4パネル） | 左上: 平均同色比率の上昇カーブ，右上: 異色近隣なし割合の推移，左下: 不満足数・移動数の減衰，右下: 非類似性指数D |
 | `animation.gif` | グリッド進化のアニメーション | 左パネルでエージェントの移動，右パネルでメトリクスの変化をステップごとに追跡 |
+
+### スイープ可視化出力
+
+| ファイル | 内容 | 見るポイント |
+|---------|------|------------|
+| `sweep_avg_same_ratio.png` | パラメータ vs 平均同色近隣比率 | τの増加に伴う分離度の上昇カーブ．集団A/Bの差異も確認可能 |
+| `sweep_pct_no_opposite.png` | パラメータ vs 異色近隣なし割合 | 完全な同色クラスターに囲まれたエージェントの増加傾向 |
+| `sweep_convergence.png` | パラメータ vs 収束ステップ数 | τが中程度（0.4〜0.6）で収束に時間がかかり，高すぎると収束しない傾向 |
+| `sweep_overview.png` | 4指標の概要パネル | 全体的なパラメータ感度を一覧で把握 |
 
 ### 典型的な結果の読み方
 

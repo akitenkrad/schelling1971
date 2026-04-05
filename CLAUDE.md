@@ -56,7 +56,8 @@ cargo fmt --check
 
 ### Python (analysis/)
 
-- **visualize.py** — `results/latest/snapshots/`のCSVと`results/latest/metrics.csv`を読み込み，グリッドヒートマップ・メトリクス時系列・GIFアニメーションを生成．`--results_dir`で特定の実行結果を指定可能
+- **visualize.py** — 単一実行の可視化．`results/latest/snapshots/`のCSVと`results/latest/metrics.csv`を読み込み，グリッドヒートマップ・メトリクス時系列・GIFアニメーションを生成
+- **visualize_sweep.py** — スイープ結果の可視化．`sweep_summary.csv`を読み込み，1Dスイープは折れ線グラフ（エラーバー付き），2Dスイープはヒートマップを生成
 
 ### 出力構造
 
