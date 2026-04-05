@@ -60,18 +60,20 @@ results/
 
 ### 2. 可視化 (Python)
 
+Python依存管理には [uv](https://docs.astral.sh/uv/) を使用．
+
 ```bash
 # 依存パッケージのインストール
-pip install -r analysis/requirements.txt
+uv sync
 
 # 可視化を実行 (シミュレーション後に実行)
-python analysis/visualize.py
+uv run python analysis/visualize.py
 
 # アニメーションのフレーム数を制限して高速生成
-python analysis/visualize.py --max_frames 30 --fps 8
+uv run python analysis/visualize.py --max_frames 30 --fps 8
 
 # アニメーションをスキップして静止画のみ生成
-python analysis/visualize.py --no_animation
+uv run python analysis/visualize.py --no_animation
 ```
 
 **出力ファイル:**
