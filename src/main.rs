@@ -473,9 +473,16 @@ struct FlatRunCli {
 }
 
 fn main() {
-    // まずサブコマンド付きでパースを試みる
     let args: Vec<String> = std::env::args().collect();
-    if let Ok(cli) = Cli::try_parse_from(&args) {
+
+    // 第1引数がサブコマンド名かどうかで分岐
+    let has_subcommand = args
+        .get(1)
+        .map(|a| a == "run" || a == "sweep" || a == "help" || a == "--help" || a == "-h")
+        .unwrap_or(false);
+
+    if has_subcommand {
+        let cli = Cli::parse_from(&args);
         match cli.command {
             Some(Commands::Run(run_args)) => cmd_run(run_args),
             Some(Commands::Sweep(sweep_args)) => cmd_sweep(sweep_args),
