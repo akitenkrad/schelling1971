@@ -30,6 +30,11 @@ import numpy as np
 import pandas as pd
 
 # --------------------------------------------------------------------------- #
+# 日本語フォント設定
+# --------------------------------------------------------------------------- #
+plt.rcParams["font.family"] = "Hiragino Sans"
+
+# --------------------------------------------------------------------------- #
 # カラー設定
 # --------------------------------------------------------------------------- #
 COLOR_EMPTY  = "#F5F5F0"   # 空きセル (アイボリー)
@@ -331,12 +336,12 @@ def parse_args() -> argparse.Namespace:
         description="Schelling 分離モデル 可視化スクリプト"
     )
     p.add_argument(
-        "--results_dir", default="results",
-        help="Rustシミュレーションの出力ディレクトリ (default: results)"
+        "--results_dir", default="results/latest",
+        help="Rustシミュレーションの出力ディレクトリ (default: results/latest)"
     )
     p.add_argument(
-        "--output_dir", default="results/figures",
-        help="図の保存先ディレクトリ (default: results/figures)"
+        "--output_dir", default=None,
+        help="図の保存先ディレクトリ (default: {results_dir}/figures)"
     )
     p.add_argument(
         "--fps", type=int, default=5,
@@ -358,7 +363,7 @@ def main() -> None:
 
     snapshots_dir = os.path.join(args.results_dir, "snapshots")
     metrics_path  = os.path.join(args.results_dir, "metrics.csv")
-    out_dir       = args.output_dir
+    out_dir       = args.output_dir if args.output_dir else os.path.join(args.results_dir, "figures")
 
     os.makedirs(out_dir, exist_ok=True)
 

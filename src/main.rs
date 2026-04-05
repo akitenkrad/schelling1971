@@ -3,6 +3,9 @@ mod grid;
 mod metrics;
 mod simulation;
 
+use std::path::Path;
+
+use chrono::Local;
 use clap::Parser;
 use config::Config;
 use simulation::{run, save_metrics};
@@ -57,6 +60,10 @@ struct Args {
 fn main() {
     let args = Args::parse();
 
+    // タイムスタンプ付きサブディレクトリを生成
+    let timestamp = Local::now().format("%Y%m%d_%H%M%S").to_string();
+    let output_dir = format!("{}/{}", args.output_dir, timestamp);
+
     let total = args.rows * args.cols;
     let (n_a, n_b) = if args.n_a == 0 || args.n_b == 0 {
         let n_vacant = (total as f64 * args.vacant_rate).round() as usize;
@@ -76,7 +83,7 @@ fn main() {
         max_iterations: args.max_iterations,
         seed: args.seed,
         snapshot_interval: args.snapshot_interval,
-        output_dir: args.output_dir.clone(),
+        output_dir: output_dir.clone(),
     };
 
     println!("=== Schelling 分離モデル 再現実験 ===");
@@ -95,6 +102,16 @@ fn main() {
 
     let result = run(&cfg);
     save_metrics(&result.metrics_history, &cfg.output_dir);
+
+    // latest シンボリックリンクを作成・更新
+    let symlink_path = Path::new(&args.output_dir).join("latest");
+    if symlink_path.is_symlink() {
+        let _ = std::fs::remove_file(&symlink_path);
+    }
+    #[cfg(unix)]
+    {
+        let _ = std::os::unix::fs::symlink(&timestamp, &symlink_path);
+    }
 
     let last = result.metrics_history.last().unwrap();
     println!(

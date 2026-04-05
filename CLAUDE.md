@@ -20,12 +20,15 @@ cargo run --release
 # パラメータ指定
 cargo run --release -- --rows 20 --cols 20 --threshold 0.5 --seed 42
 
-# 可視化 (シミュレーション実行後)
+# 可視化 (シミュレーション実行後，results/latest 経由で最新結果を自動参照)
 uv sync
 uv run python analysis/visualize.py
 
 # アニメーションなしで高速可視化
 uv run python analysis/visualize.py --no_animation
+
+# 特定の実行結果を可視化
+uv run python analysis/visualize.py --results_dir results/20260405_153000
 ```
 
 ## Testing & Linting
@@ -49,15 +52,21 @@ cargo fmt --check
 
 ### Python (analysis/)
 
-- **visualize.py** — `results/snapshots/`のCSVと`results/metrics.csv`を読み込み，グリッドヒートマップ・メトリクス時系列・GIFアニメーションを生成
+- **visualize.py** — `results/latest/snapshots/`のCSVと`results/latest/metrics.csv`を読み込み，グリッドヒートマップ・メトリクス時系列・GIFアニメーションを生成．`--results_dir`で特定の実行結果を指定可能
 
 ### 出力構造
 
+各実行はタイムスタンプ付きサブディレクトリに保存される．`results/latest`は最新の実行へのシンボリックリンク．
+
 ```
 results/
-├── metrics.csv          # ステップごとの分離度指標
-├── snapshots/step_*.csv # グリッド状態 (row,col,cell: 0=空,1=A,2=B)
-└── figures/             # 可視化出力 (visualize.py生成)
+├── latest -> 20260405_153000       # 最新実行へのシンボリックリンク
+├── 20260405_153000/                # タイムスタンプ付き実行結果
+│   ├── metrics.csv                 # ステップごとの分離度指標
+│   ├── snapshots/step_*.csv        # グリッド状態 (row,col,cell: 0=空,1=A,2=B)
+│   └── figures/                    # 可視化出力 (visualize.py生成)
+└── 20260405_160000/                # 別の実行結果
+    └── ...
 ```
 
 ## Key Design Decisions
