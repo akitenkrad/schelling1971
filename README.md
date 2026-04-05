@@ -2,10 +2,6 @@
 
 Schelling (1971) "Dynamic Models of Segregation" の再現実験実装．
 
-> **設計ドキュメント (DESIGN) はObsidianで管理しています．**
->
-> 📝 `Obsidian > 研究/90_再現実装/Dynamic Models of Segregation.md`
-
 ## 参照論文
 
 Schelling, T. C. (1971). Dynamic Models of Segregation.  
@@ -64,7 +60,53 @@ results/
 
 ---
 
-### 2. 可視化 (Python)
+### 2. パラメータスイープ（感度分析）
+
+パラメータの範囲を `start:stop:step` 形式で指定し，グリッドサーチを実行する．
+
+```bash
+# τ を 0.1〜0.9 まで 0.1 刻みでスイープ
+cargo run --release -- sweep --threshold 0.1:0.9:0.1
+
+# τ と空き地率の2次元スイープ
+cargo run --release -- sweep --threshold 0.1:0.5:0.1 --vacant_rate 0.2:0.4:0.1
+
+# 複数シードで統計的安定性を確認
+cargo run --release -- sweep --threshold 0.1:0.9:0.1 --seeds 42,123,456
+
+# グリッドサイズを変更してスイープ
+cargo run --release -- sweep --threshold 0.1:0.9:0.1 --rows 20 --cols 20
+```
+
+**sweepオプション:**
+
+| オプション | デフォルト | 説明 |
+|-----------|-----------|------|
+| `--threshold` | 0.333 | τ の範囲（`start:stop:step`）または単一値 |
+| `--vacant_rate` | 0.30 | 空き地率の範囲（`start:stop:step`）または単一値 |
+| `--rows` | 13 | グリッド行数 |
+| `--cols` | 16 | グリッド列数 |
+| `--seeds` | 42 | カンマ区切りの乱数シード |
+| `--max_iterations` | 500 | 最大反復回数 |
+| `--snapshot_interval` | 0 | スナップショット保存間隔（0=保存しない） |
+| `--output_dir` | `results` | 出力先ベースディレクトリ |
+
+**出力ファイル:**
+
+```
+results/{timestamp}_sweep/
+├── sweep_summary.csv                ← 全パラメータ組み合わせの最終メトリクス
+├── sweep_config.json                ← スイープ設定（再現用）
+├── tau_0.100_vac_0.300_seed_42/
+│   └── metrics.csv
+├── tau_0.200_vac_0.300_seed_42/
+│   └── metrics.csv
+└── ...
+```
+
+---
+
+### 3. 可視化 (Python)
 
 Python依存管理には [uv](https://docs.astral.sh/uv/) を使用．
 

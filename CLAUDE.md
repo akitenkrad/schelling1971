@@ -20,6 +20,9 @@ cargo run --release
 # パラメータ指定
 cargo run --release -- --rows 20 --cols 20 --threshold 0.5 --seed 42
 
+# パラメータスイープ（感度分析）
+cargo run --release -- sweep --threshold 0.1:0.9:0.1 --seeds 42,123,456
+
 # 可視化 (シミュレーション実行後，results/latest 経由で最新結果を自動参照)
 uv sync
 uv run python analysis/visualize.py
@@ -49,6 +52,7 @@ cargo fmt --check
 - **grid.rs** — `Grid`と`Cell`(GroupA/GroupB/Empty)．ムーア近傍（8近傍）の同色比率計算，移動先の仮想比率シミュレーション(`simulated_ratio`)，チェビシェフ距離
 - **metrics.rs** — `Metrics`構造体．各ステップの分離度指標（平均同色比率，異色近隣なし割合，非類似性指数D，不満足数，移動数）を集計
 - **simulation.rs** — メインループ．不満足エージェントをランダム順で処理し，チェビシェフ距離昇順で最近接の満足可能な空きセルへ移動．移動0またはn_dissatisfied=0で収束
+- **main.rs** — CLIエントリポイント．`run`（単一実行）と`sweep`（パラメータスイープ）のサブコマンド．サブコマンド省略時は`run`として動作
 
 ### Python (analysis/)
 
