@@ -1,0 +1,17 @@
+# Rust build artifacts
+target/
+**/*.rs.bk
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Simulation outputs
+results/
+
+# Claude Code local settings and notes
+.claude/
+
+# macOS
+.DS_Store
