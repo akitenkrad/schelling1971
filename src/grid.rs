@@ -1,5 +1,7 @@
 use serde::Serialize;
 
+use crate::config::SatisfactionRule;
+
 /// セルの状態
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize)]
 pub enum Cell {
@@ -55,51 +57,77 @@ impl Grid {
         result
     }
 
+    /// 指定セルの (同色近隣数, 占有近隣数) を返す．
+    /// 空きセルを指定した場合は (0, 0) を返す．
+    pub fn neighbor_counts(&self, r: usize, c: usize) -> (usize, usize) {
+        let agent = self.cells[r][c];
+        if agent == Cell::Empty {
+            return (0, 0);
+        }
+        let mut same = 0usize;
+        let mut total = 0usize;
+        for (nr, nc) in self.moore_neighbors(r, c) {
+            let nb = self.cells[nr][nc];
+            if nb == Cell::Empty {
+                continue;
+            }
+            total += 1;
+            if nb == agent {
+                same += 1;
+            }
+        }
+        (same, total)
+    }
+
     /// 指定セルの同色近隣比率を計算する
     /// 占有近隣セルが 0 の場合は 1.0 (満足) を返す
     pub fn same_color_ratio(&self, r: usize, c: usize) -> f64 {
-        let agent = self.cells[r][c];
-        if agent == Cell::Empty {
+        let (same, total) = self.neighbor_counts(r, c);
+        if total == 0 {
             return 1.0;
         }
-        let neighbors = self.moore_neighbors(r, c);
-        let occupied: Vec<_> = neighbors
-            .iter()
-            .filter(|&&(nr, nc)| self.cells[nr][nc] != Cell::Empty)
-            .collect();
-        if occupied.is_empty() {
-            return 1.0;
+        same as f64 / total as f64
+    }
+
+    /// エージェントがルールに照らして満足しているか判定する
+    pub fn is_satisfied(&self, r: usize, c: usize, rule: SatisfactionRule) -> bool {
+        if self.cells[r][c] == Cell::Empty {
+            return true;
         }
-        let same = occupied
-            .iter()
-            .filter(|&&(nr, nc)| self.cells[*nr][*nc] == agent)
-            .count();
-        same as f64 / occupied.len() as f64
+        let (same, total) = self.neighbor_counts(r, c);
+        rule.evaluate(same, total)
     }
 
-    /// エージェントが満足しているか判定する
-    pub fn is_satisfied(&self, r: usize, c: usize, threshold: f64) -> bool {
-        self.same_color_ratio(r, c) >= threshold
-    }
-
-    /// 仮に (from) から (to) へ移動した場合の同色比率をシミュレーションする
-    pub fn simulated_ratio(&self, from: (usize, usize), to: (usize, usize)) -> f64 {
+    /// (from) から (to) へ移動したと仮定した場合の (同色近隣数, 占有近隣数) を返す
+    pub fn simulated_counts(&self, from: (usize, usize), to: (usize, usize)) -> (usize, usize) {
         let agent = self.cells[from.0][from.1];
-        let neighbors = self.moore_neighbors(to.0, to.1);
         let mut same = 0usize;
         let mut total = 0usize;
-        for &(nr, nc) in &neighbors {
+        for (nr, nc) in self.moore_neighbors(to.0, to.1) {
             if (nr, nc) == from {
                 continue; // 元の位置は空になる
             }
-            if self.cells[nr][nc] != Cell::Empty {
-                total += 1;
-                if self.cells[nr][nc] == agent {
-                    same += 1;
-                }
+            let nb = self.cells[nr][nc];
+            if nb == Cell::Empty {
+                continue;
+            }
+            total += 1;
+            if nb == agent {
+                same += 1;
             }
         }
-        if total == 0 { 1.0 } else { same as f64 / total as f64 }
+        (same, total)
+    }
+
+    /// (from) から (to) へ移動した場合にルール上満足となるか判定する
+    pub fn will_be_satisfied_after_move(
+        &self,
+        from: (usize, usize),
+        to: (usize, usize),
+        rule: SatisfactionRule,
+    ) -> bool {
+        let (same, total) = self.simulated_counts(from, to);
+        rule.evaluate(same, total)
     }
 
     /// 全空きセルをリストアップする

@@ -75,7 +75,7 @@ pub fn run(cfg: &Config) -> SimulationResult {
         for r in 0..grid.rows {
             for c in 0..grid.cols {
                 if grid.cells[r][c] != Cell::Empty
-                    && !grid.is_satisfied(r, c, cfg.threshold)
+                    && !grid.is_satisfied(r, c, cfg.rule)
                 {
                     dissatisfied.push((r, c));
                 }
@@ -105,7 +105,7 @@ pub fn run(cfg: &Config) -> SimulationResult {
         let mut n_moved = 0usize;
         for (r, c) in &dissatisfied {
             // 他の移動で満足になっていたらスキップ
-            if grid.is_satisfied(*r, *c, cfg.threshold) {
+            if grid.is_satisfied(*r, *c, cfg.rule) {
                 continue;
             }
 
@@ -114,7 +114,7 @@ pub fn run(cfg: &Config) -> SimulationResult {
             vacants.sort_by_key(|&v| Grid::chebyshev((*r, *c), v));
 
             for v in &vacants {
-                if grid.simulated_ratio((*r, *c), *v) >= cfg.threshold {
+                if grid.will_be_satisfied_after_move((*r, *c), *v, cfg.rule) {
                     // 移動を実行
                     grid.cells[v.0][v.1] = grid.cells[*r][*c];
                     grid.cells[*r][*c] = Cell::Empty;

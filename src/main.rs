@@ -9,7 +9,7 @@ use std::path::Path;
 
 use chrono::Local;
 use clap::{Parser, Subcommand};
-use config::Config;
+use config::{Config, SatisfactionRule};
 use csv::Writer;
 use simulation::{run, save_metrics};
 
@@ -57,9 +57,14 @@ struct RunArgs {
     #[arg(long, default_value_t = 0.30)]
     vacant_rate: f64,
 
-    /// 許容限界 τ: 同色近隣比率の最小要求値
+    /// 許容限界 τ: 同色近隣比率の最小要求値 (--rule 未指定時のみ使用)
     #[arg(long, default_value_t = 0.333)]
     threshold: f64,
+
+    /// 満足判定ルール: "ratio:X" (分離型) / "min-same:N" (集会型, Fig.16) /
+    /// "bounded:L:H" (統合型, Fig.17)．省略時は --threshold から ratio ルールを構築する．
+    #[arg(long)]
+    rule: Option<String>,
 
     /// 最大反復回数
     #[arg(long, default_value_t = 500)]
@@ -153,6 +158,40 @@ fn parse_range(s: &str) -> Vec<f64> {
     }
 }
 
+/// 文字列を SatisfactionRule にパースする．
+///
+/// - "ratio:0.333"      → Ratio { threshold: 0.333 }
+/// - "min-same:3"       → MinSame { min_same: 3 }
+/// - "bounded:3:6"      → Bounded { min_same: 3, max_same: 6 }
+fn parse_rule_string(s: &str) -> SatisfactionRule {
+    let parts: Vec<&str> = s.split(':').collect();
+    match parts.as_slice() {
+        ["ratio", t] => {
+            let threshold: f64 = t.parse().expect("ratio の閾値パースに失敗");
+            SatisfactionRule::Ratio { threshold }
+        }
+        ["min-same", n] => {
+            let min_same: usize = n.parse().expect("min-same の値パースに失敗");
+            SatisfactionRule::MinSame { min_same }
+        }
+        ["bounded", lo, hi] => {
+            let min_same: usize = lo.parse().expect("bounded の下限パースに失敗");
+            let max_same: usize = hi.parse().expect("bounded の上限パースに失敗");
+            assert!(
+                min_same <= max_same,
+                "bounded ルールは下限 ({}) <= 上限 ({}) である必要があります",
+                min_same,
+                max_same
+            );
+            SatisfactionRule::Bounded { min_same, max_same }
+        }
+        _ => panic!(
+            "不正なルール形式: \"{}\" (ratio:X, min-same:N, bounded:L:H のいずれか)",
+            s
+        ),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // sweep_summary.csv の1行
 // ---------------------------------------------------------------------------
@@ -223,12 +262,17 @@ fn cmd_run(args: RunArgs) {
         (args.n_a, args.n_b)
     };
 
+    let rule = match &args.rule {
+        Some(s) => parse_rule_string(s),
+        None => SatisfactionRule::Ratio { threshold: args.threshold },
+    };
+
     let cfg = Config {
         rows: args.rows,
         cols: args.cols,
         n_a,
         n_b,
-        threshold: args.threshold,
+        rule,
         max_iterations: args.max_iterations,
         seed: args.seed,
         snapshot_interval: args.snapshot_interval,
@@ -237,13 +281,13 @@ fn cmd_run(args: RunArgs) {
 
     println!("=== Schelling 分離モデル 再現実験 ===");
     println!(
-        "グリッド: {}×{} | A: {} | B: {} | 空き: {} | τ: {:.3}",
+        "グリッド: {}×{} | A: {} | B: {} | 空き: {} | ルール: {}",
         cfg.rows,
         cfg.cols,
         cfg.n_a,
         cfg.n_b,
         total - cfg.n_a - cfg.n_b,
-        cfg.threshold
+        cfg.rule.label(),
     );
     println!("シード: {:?}", cfg.seed);
     println!("出力先: {}", cfg.output_dir);
@@ -349,7 +393,7 @@ fn cmd_sweep(args: SweepArgs) {
             cols: args.cols,
             n_a,
             n_b,
-            threshold: combo.threshold,
+            rule: SatisfactionRule::Ratio { threshold: combo.threshold },
             max_iterations: args.max_iterations,
             seed: Some(combo.seed),
             snapshot_interval: args.snapshot_interval,
