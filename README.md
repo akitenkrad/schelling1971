@@ -18,15 +18,15 @@ DOI: [10.1080/0022250X.1971.9989794](https://doi.org/10.1080/0022250X.1971.99897
 # ビルド
 cargo build --release
 
-# 標準設定で実行 (13×16グリッド, τ=1/3)
+# 標準設定で実行 (13×16グリッド, τ=1/3, seed=42)
 cargo run --release
 
 # パラメータを指定して実行
-cargo run --release -- \
+cargo run --release -- run \
     --rows 20 --cols 20 \
     --threshold 0.5 \
     --seed 42 \
-    --output_dir results
+    --output-dir results
 ```
 
 **主なオプション:**
@@ -35,15 +35,38 @@ cargo run --release -- \
 |-----------|-----------|------|
 | `--rows` | 13 | グリッド行数 |
 | `--cols` | 16 | グリッド列数 |
-| `--threshold` | 0.333 | 許容限界 τ |
-| `--vacant_rate` | 0.30 | 空き地率 |
+| `--n-a`, `--n-b` | 0 (自動) | 各集団のエージェント数（0なら `--vacant-rate` から等数で自動計算） |
+| `--threshold` | 0.333 | 許容限界 τ（`--rule` 未指定時のみ使用） |
+| `--rule` | — | 満足判定ルール文字列（後述） |
+| `--vacant-rate` | 0.30 | 空き地率 |
 | `--seed` | — | 乱数シード |
-| `--snapshot_interval` | 1 | スナップショット保存間隔 |
-| `--output_dir` | `results` | 出力先ディレクトリ |
+| `--snapshot-interval` | 1 | スナップショット保存間隔（0=保存しない） |
+| `--output-dir` | `results` | 出力先ディレクトリ |
+
+#### 満足判定ルール (`--rule`)
+
+論文の3種類の選好形式を `--rule` フラグで切り替えられる．未指定時は `--threshold` から `ratio` ルールが構築される．
+
+| ルール | 形式 | 意味 | 対応論文図 |
+|---|---|---|---|
+| 分離型 | `ratio:X` | 同色近隣比率 ≥ X | Fig. 7–14（デフォルト） |
+| 集会型 | `min-same:N` | 同色近隣の絶対数 ≥ N | Fig. 16 |
+| 統合型 | `bounded:L:H` | 同色近隣の絶対数が L–H の範囲 | Fig. 17 |
+
+```bash
+# 分離型（既存動作と等価）
+cargo run --release -- run --rule ratio:0.333
+
+# 集会選好（同色が絶対数3人以上で満足）
+cargo run --release -- run --rule min-same:3
+
+# 統合選好（同色が3〜6人なら満足，多すぎても移動する）
+cargo run --release -- run --rule bounded:3:6
+```
 
 **出力ファイル:**
 
-各実行はタイムスタンプ付きサブディレクトリに保存される．`results/latest`は最新の実行へのシンボリックリンク．
+各実行はタイムスタンプ付きサブディレクトリに保存される．`results/latest` は最新の実行へのシンボリックリンク．
 
 ```
 results/
@@ -62,14 +85,14 @@ results/
 
 ### 2. パラメータスイープ（感度分析）
 
-パラメータの範囲を `start:stop:step` 形式で指定し，グリッドサーチを実行する．
+パラメータの範囲を `start:stop:step` 形式で指定し，グリッドサーチを実行する（sweepは`ratio`ルール専用）．
 
 ```bash
 # τ を 0.1〜0.9 まで 0.1 刻みでスイープ
 cargo run --release -- sweep --threshold 0.1:0.9:0.1
 
 # τ と空き地率の2次元スイープ
-cargo run --release -- sweep --threshold 0.1:0.5:0.1 --vacant_rate 0.2:0.4:0.1
+cargo run --release -- sweep --threshold 0.1:0.5:0.1 --vacant-rate 0.2:0.4:0.1
 
 # 複数シードで統計的安定性を確認
 cargo run --release -- sweep --threshold 0.1:0.9:0.1 --seeds 42,123,456
@@ -83,13 +106,13 @@ cargo run --release -- sweep --threshold 0.1:0.9:0.1 --rows 20 --cols 20
 | オプション | デフォルト | 説明 |
 |-----------|-----------|------|
 | `--threshold` | 0.333 | τ の範囲（`start:stop:step`）または単一値 |
-| `--vacant_rate` | 0.30 | 空き地率の範囲（`start:stop:step`）または単一値 |
+| `--vacant-rate` | 0.30 | 空き地率の範囲（`start:stop:step`）または単一値 |
 | `--rows` | 13 | グリッド行数 |
 | `--cols` | 16 | グリッド列数 |
 | `--seeds` | 42 | カンマ区切りの乱数シード |
-| `--max_iterations` | 500 | 最大反復回数 |
-| `--snapshot_interval` | 0 | スナップショット保存間隔（0=保存しない） |
-| `--output_dir` | `results` | 出力先ベースディレクトリ |
+| `--max-iterations` | 500 | 最大反復回数 |
+| `--snapshot-interval` | 0 | スナップショット保存間隔（0=保存しない） |
+| `--output-dir` | `results` | 出力先ベースディレクトリ |
 
 **出力ファイル:**
 
@@ -106,7 +129,61 @@ results/{timestamp}_sweep/
 
 ---
 
-### 3. 可視化 (Python)
+### 3. 論文再現実験（Fig. 7–17）
+
+`analysis/reproduce_paper.py` は論文で報告された主要実験を一括で実行し，各図の報告値との比較レポートを生成する．
+
+```bash
+# 全実験を5シードで再現（推奨）
+uv run python analysis/reproduce_paper.py
+
+# シード指定
+uv run python analysis/reproduce_paper.py --seeds 42,123,456,789,2024
+
+# 特定実験のみ実行（カンマ区切り可）
+uv run python analysis/reproduce_paper.py --only fig11_tau_one_third,fig16_congregationist_min_same_3
+
+# τ感度解析をスキップして高速化
+uv run python analysis/reproduce_paper.py --skip-sweep
+
+# cargo build をスキップ（ビルド済みバイナリを使う）
+uv run python analysis/reproduce_paper.py --skip-build
+```
+
+**再現対象:**
+
+| キー | 図 | 設定 | 論文値 |
+|---|---|---|---|
+| `fig11_tau_one_third` | Fig. 11 | τ=1/3, 等数 | avg_same 65–75% |
+| `fig09_tau_one_half_lenient` | Fig. 9 | τ=1/2, 等数（緩運用） | avg_same 80–83% |
+| `fig08_tau_one_half_strict` | Fig. 8 | τ=1/2, 等数（厳格運用の近似） | avg_same 89–91% |
+| `fig12_unequal_two_to_one` | Fig. 12 | τ=1/3, 不等数 97:49 | 少数派 >80% |
+| `fig16_congregationist_min_same_3` | Fig. 16 | `min-same:3` | avg_same ≈75%, 異色近隣なし ≈38% |
+| `fig17_integrationist_bounded_3_6` | Fig. 17 | `bounded:3:6` | 定性報告: dead space形成・収束困難 |
+| `fig14_tau_sweep` | Fig. 14 | τ=0.10–0.60 (0.05刻み) | 0.35–0.50で急峻な上昇 |
+
+**注記:**
+- **Fig. 8 の「厳格運用」は未再現**．現実装では満足エージェントは移動しない．論文の厳格版は投機的移動を伴う．
+- **Fig. 17 は論文が定量値を示していない**ため，数値比較ではなく収束ステップ数の挙動（統合選好は収束困難）で論文挙動を確認する．
+
+**出力ファイル:**
+
+```
+results/paper_reproduction/{timestamp}/
+├── reproduction_summary.json       ← 構造化データ（per-seed メトリクスと集計）
+├── reproduction_summary.csv        ← 表形式の per-seed 結果
+├── reproduction_report.txt         ← コンソール出力と同じ比較レポート
+├── fig11_tau_one_third/
+│   └── seed_{N}/{timestamp}/metrics.csv
+├── fig16_congregationist_min_same_3/
+│   └── ...
+└── fig14_tau_sweep/
+    └── {timestamp}_sweep/sweep_summary.csv
+```
+
+---
+
+### 4. 可視化 (Python)
 
 Python依存管理には [uv](https://docs.astral.sh/uv/) を使用．
 
@@ -174,12 +251,12 @@ results/latest/figures/
 | カラム | 説明 | 値の範囲 | 読み方 |
 |-------|------|---------|-------|
 | `step` | シミュレーションステップ番号 | 0〜 | — |
-| `avg_same_ratio` | 全エージェントの平均同色近隣比率 | 0.0〜1.0 | 高いほど分離が進行．ランダム配置では集団比率に近い値（≈0.5），収束時は0.6〜0.8程度になる |
+| `avg_same_ratio` | 全エージェントの平均同色近隣比率 | 0.0〜1.0 | 高いほど分離が進行．ランダム配置では集団比率に近い値（≈0.5），収束時は0.6〜0.9程度になる |
 | `avg_same_ratio_a` | 集団Aの平均同色近隣比率 | 0.0〜1.0 | 集団間の分離度の非対称性を確認するために使用 |
 | `avg_same_ratio_b` | 集団Bの平均同色近隣比率 | 0.0〜1.0 | 同上 |
 | `pct_no_opposite` | 異色近隣を持たないエージェントの割合 | 0〜100 (%) | 高いほど同色のみに囲まれたエージェントが多い＝分離が強い |
-| `dissimilarity_index` | 非類似性指数 D（簡易版） | 0.0〜0.5 | 格子全体を1ゾーンとした D = 0.5 × |a/A − b/B|．集団サイズが均等なら≈0 |
-| `n_dissatisfied` | 不満足エージェント数 | 0〜 | 同色近隣比率がτ未満のエージェント数．0になると収束 |
+| `dissimilarity_index` | 非類似性指数 D（簡易版） | 0.0〜0.5 | 格子全体を1ゾーンとした D = 0.5 × \|a/A − b/B\|．集団サイズが均等なら≈0 |
+| `n_dissatisfied` | 不満足エージェント数 | 0〜 | ルール上不満足と判定されたエージェント数．0になると収束 |
 | `n_moved` | 移動したエージェント数 | 0〜 | 各ステップで実際に移動が成立した数．0になると収束 |
 
 ### 可視化出力 (results/latest/figures/)
@@ -204,7 +281,10 @@ results/latest/figures/
 ### 典型的な結果の読み方
 
 - **τ=1/3（デフォルト）の場合**: 各エージェントは近隣の1/3以上が同色であれば満足する緩い条件だが，avg_same_ratioは初期の≈0.50から≈0.65以上まで上昇し，マクロレベルでは顕著なクラスターが形成される．これがSchellingの「穏やかな個人選好がマクロな分離を生む」という主張の核心．
-- **収束の判定**: `n_dissatisfied=0`（全員が満足）または`n_moved=0`（移動先が見つからない）でシミュレーションが終了する．
+- **τ感度解析の非線形性**: `reproduce_paper.py` のFig. 14スイープでは，τ=0.35付近までは avg_same がゆるやかに上昇し，τ=0.45–0.55 付近で急峻に 0.80→0.90 に跳ね上がる．Schellingが論文中で強調した「ミクロ選好とマクロ結果の非対応性」の核心的エビデンス．
+- **集会選好 vs 分離選好の区別不能性**: `--rule min-same:3` と `--rule ratio:0.4` はほぼ同じ均衡同色比率（≈0.78）を示す．これは論文Fig.16の「集結志向も分離志向もマクロでは同等の分離を生む」という主要知見に対応．
+- **統合選好の収束困難性**: `--rule bounded:3:6` では一部のシードで収束が遅く（15ステップ以上），論文が指摘する「dead space 形成」と整合．
+- **収束の判定**: `n_dissatisfied=0`（全員が満足）または `n_moved=0`（移動先が見つからない）でシミュレーションが終了する．
 
 ---
 
