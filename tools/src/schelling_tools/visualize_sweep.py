@@ -12,7 +12,9 @@ Outputs:
     ├── sweep_avg_same_ratio.png  ← 平均同色近隣比率 (1Dライン or 2Dヒートマップ)
     ├── sweep_pct_no_opposite.png ← 異色近隣なし割合
     ├── sweep_convergence.png     ← 収束速度 (最終イテレーション数)
-    └── sweep_overview.png        ← 2×2 パネル概要図
+    ├── sweep_overview.png        ← 2×2 パネル概要図
+    └── sweep_grid_animation.gif  ← パラメータ組み合わせ別のグリッドアニメーション
+                                    (sweep を --snapshot-interval > 0 で実行した場合のみ)
 """
 
 from __future__ import annotations
@@ -22,9 +24,17 @@ import json
 import os
 import sys
 
+import matplotlib.animation as animation
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+
+from schelling_tools.visualize import (
+    CMAP,
+    LEGEND_PATCHES,
+    NORM,
+    load_all_snapshots,
+)
 
 # --------------------------------------------------------------------------- #
 # 日本語フォント設定
@@ -429,6 +439,227 @@ def save_overview(
 
 
 # --------------------------------------------------------------------------- #
+# パラメータ組み合わせ別グリッドアニメーション
+# --------------------------------------------------------------------------- #
+
+
+def _run_dir_name(threshold: float, vacant_rate: float, seed: int) -> str:
+    """Rust 側 (cmd_sweep) と整合する run ディレクトリ名を生成する."""
+    return f"tau_{threshold:.3f}_vac_{vacant_rate:.3f}_seed_{seed}"
+
+
+def _enumerate_combos(
+    df: pd.DataFrame, sweep_type: str, sweep_cols: list[str], seed: int,
+) -> tuple[int, int, list[tuple[float, float]], list[str]]:
+    """グリッドレイアウトと各セルの (vacant_rate, threshold) を列挙する.
+
+    Returns:
+        (n_rows, n_cols, combo_keys, combo_labels)
+        combo_keys[i] = (vacant_rate, threshold) でセル i に対応する run を一意に特定する.
+    """
+    if sweep_type == "2d":
+        thresholds = sorted(df["threshold"].unique())
+        vacant_rates = sorted(df["vacant_rate"].unique())
+        n_rows = len(vacant_rates)
+        n_cols = len(thresholds)
+        # 行: vacant_rate (上→下で増加), 列: threshold (左→右で増加)
+        combo_keys = [(v, t) for v in vacant_rates for t in thresholds]
+        combo_labels = [f"τ={t:.3g}, vac={v:.3g}" for v, t in combo_keys]
+        return n_rows, n_cols, combo_keys, combo_labels
+
+    # 1D: 単一パラメータが変化．他方は df から固定値を取得
+    x_col = sweep_cols[0]
+    xs = sorted(df[x_col].unique())
+    n = len(xs)
+    n_cols = min(n, 4)
+    n_rows = (n + n_cols - 1) // n_cols
+
+    if x_col == "threshold":
+        fixed_vac = float(df["vacant_rate"].iloc[0])
+        combo_keys = [(fixed_vac, t) for t in xs]
+        combo_labels = [f"τ={t:.3g}" for t in xs]
+    else:
+        fixed_tau = float(df["threshold"].iloc[0])
+        combo_keys = [(v, fixed_tau) for v in xs]
+        combo_labels = [f"vac={v:.3g}" for v in xs]
+    return n_rows, n_cols, combo_keys, combo_labels
+
+
+def save_grid_animation(
+    sweep_dir: str,
+    df: pd.DataFrame,
+    sweep_type: str,
+    sweep_cols: list[str],
+    out_path: str,
+    *,
+    seed: int | None = None,
+    fps: int = 5,
+    max_frames: int = 0,
+    subtitle: str = "",
+) -> bool:
+    """各パラメータ組み合わせのグリッド進行アニメーションを格子状に並べた合成 GIF を保存する.
+
+    各セルは選択された seed の run のスナップショットを再生する．収束ステップの異なる
+    run はそれぞれの最終フレームを保持して同期する．
+
+    Returns:
+        True: 保存成功 / False: 利用可能なスナップショットが無くスキップ
+    """
+    available_seeds = sorted(int(s) for s in df["seed"].unique())
+    if not available_seeds:
+        print("  警告: sweep_summary.csv に seed が含まれていません．スキップ．")
+        return False
+    if seed is None:
+        seed = available_seeds[0]
+    elif seed not in available_seeds:
+        print(
+            f"  警告: 指定 seed={seed} はスイープ結果にありません {available_seeds}．"
+            f"先頭シード seed={available_seeds[0]} を使用．"
+        )
+        seed = available_seeds[0]
+
+    n_rows, n_cols, combo_keys, combo_labels = _enumerate_combos(
+        df, sweep_type, sweep_cols, seed,
+    )
+
+    # 各セルのスナップショットを読み込む
+    cell_snapshots: list[tuple[list[np.ndarray], list[int]] | None] = []
+    missing: list[str] = []
+    for vac, tau in combo_keys:
+        snap_dir = os.path.join(sweep_dir, _run_dir_name(tau, vac, seed), "snapshots")
+        if not os.path.isdir(snap_dir):
+            cell_snapshots.append(None)
+            missing.append(_run_dir_name(tau, vac, seed))
+            continue
+        try:
+            matrices, steps = load_all_snapshots(snap_dir)
+        except FileNotFoundError:
+            cell_snapshots.append(None)
+            missing.append(_run_dir_name(tau, vac, seed))
+            continue
+        cell_snapshots.append((matrices, steps))
+
+    valid = [s for s in cell_snapshots if s is not None]
+    if not valid:
+        print(
+            "  警告: スナップショットを持つ run が一つもありません．"
+            "sweep を `--snapshot-interval N` (N>0) 付きで再実行してください．"
+        )
+        return False
+
+    if missing:
+        print(f"  注意: {len(missing)} 件の組み合わせにスナップショットがありません (空セルとして描画)")
+
+    # 全セルで共通のフレーム数 (= 最長 run のステップ数) を決定
+    n_frames = max(len(m) for m, _ in valid)
+
+    # フレーム数を上限で間引き (均等サンプリング)
+    if max_frames > 0 and n_frames > max_frames:
+        sampled_idx = np.linspace(0, n_frames - 1, max_frames, dtype=int)
+        n_frames = len(sampled_idx)
+    else:
+        sampled_idx = np.arange(n_frames)
+
+    def cell_frame(cell_idx: int, frame_pos: int) -> tuple[np.ndarray, int]:
+        data = cell_snapshots[cell_idx]
+        assert data is not None
+        matrices, steps = data
+        # 元 run 上のステップ位置を sampled_idx 経由で算出し，run の長さで頭打ちする
+        original_pos = int(sampled_idx[frame_pos])
+        clipped = min(original_pos, len(matrices) - 1)
+        return matrices[clipped], steps[clipped]
+
+    # 図と軸を準備
+    cell_w = 2.6
+    cell_h = 2.4
+    fig_w = max(6.0, n_cols * cell_w)
+    fig_h = max(4.0, n_rows * cell_h + 1.2)
+    fig, axes = plt.subplots(
+        n_rows, n_cols, figsize=(fig_w, fig_h), facecolor=COLOR_BG, squeeze=False,
+    )
+    header = f"seed={seed}"
+    if subtitle:
+        header = f"{subtitle}，{header}"
+    # 副題込みで suptitle を 2 行表示する (overlap 回避のため fig.text を使わない)
+    fig.suptitle(
+        f"Schelling 分離モデル — パラメータ組み合わせ別アニメーション\n{header}",
+        fontsize=12,
+    )
+
+    ims: list[plt.AxesImage | None] = []
+    titles: list[plt.Text | None] = []
+    n_combos = len(combo_keys)
+    for idx in range(n_rows * n_cols):
+        r, c = divmod(idx, n_cols)
+        ax = axes[r, c]
+        ax.set_facecolor(COLOR_BG)
+        ax.set_xticks([])
+        ax.set_yticks([])
+
+        if idx >= n_combos:
+            ax.axis("off")
+            ims.append(None)
+            titles.append(None)
+            continue
+
+        data = cell_snapshots[idx]
+        label = combo_labels[idx]
+        if data is None:
+            ax.text(
+                0.5, 0.5, "(no snapshots)", ha="center", va="center",
+                transform=ax.transAxes, fontsize=8, color="#999999",
+            )
+            ax.set_title(label, fontsize=9)
+            ims.append(None)
+            titles.append(None)
+            continue
+
+        mat0, step0 = cell_frame(idx, 0)
+        im = ax.imshow(mat0, cmap=CMAP, norm=NORM, interpolation="nearest", aspect="equal")
+        title = ax.set_title(f"{label}\nstep {step0}", fontsize=8)
+        ims.append(im)
+        titles.append(title)
+
+    # 凡例は figure レベルで一度だけ描画
+    fig.legend(
+        handles=LEGEND_PATCHES,
+        loc="lower center",
+        ncol=3,
+        fontsize=8,
+        frameon=False,
+        bbox_to_anchor=(0.5, 0.0),
+    )
+
+    def _update(frame_pos: int):
+        artists = []
+        for i, data in enumerate(cell_snapshots):
+            if data is None or ims[i] is None:
+                continue
+            mat, step = cell_frame(i, frame_pos)
+            ims[i].set_data(mat)
+            titles[i].set_text(f"{combo_labels[i]}\nstep {step}")
+            artists.append(ims[i])
+            artists.append(titles[i])
+        return artists
+
+    ani = animation.FuncAnimation(
+        fig,
+        _update,
+        frames=n_frames,
+        blit=False,
+        interval=1000 // max(fps, 1),
+    )
+
+    # 行ごとの 2 行タイトル分の余白を確保
+    fig.tight_layout(rect=[0, 0.05, 1, 0.92])
+    fig.subplots_adjust(hspace=0.45, wspace=0.15)
+    ani.save(out_path, writer="pillow", fps=fps, dpi=90)
+    plt.close(fig)
+    print(f"  保存: {out_path}  ({n_frames} フレーム, {n_combos} セル, seed={seed})")
+    return True
+
+
+# --------------------------------------------------------------------------- #
 # メイン
 # --------------------------------------------------------------------------- #
 
@@ -445,6 +676,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument(
         "--output_dir", "--output-dir", default=None,
         help="図の保存先ディレクトリ (default: {sweep_dir}/figures)",
+    )
+    p.add_argument(
+        "--no_grid_animation", "--no-grid-animation", action="store_true",
+        help="パラメータ組み合わせ別グリッドアニメーションの生成をスキップする",
+    )
+    p.add_argument(
+        "--grid_seed", "--grid-seed", type=int, default=None,
+        help="グリッドアニメーションで使用する seed (default: 先頭シード)",
+    )
+    p.add_argument(
+        "--fps", type=int, default=5,
+        help="グリッドアニメーションの FPS (default: 5)",
+    )
+    p.add_argument(
+        "--max_frames", "--max-frames", type=int, default=0,
+        help="グリッドアニメーションの最大フレーム数 (0=全フレーム)",
     )
     return p.parse_args(argv)
 
@@ -469,12 +716,12 @@ def main(argv: list[str] | None = None) -> None:
     print("---------------------------------------------------")
 
     # データ読み込み
-    print("[1/5] sweep_summary.csv を読み込み中 ...")
+    print("[1/6] sweep_summary.csv を読み込み中 ...")
     df = pd.read_csv(summary_path)
     print(f"      {len(df)} 行")
 
     # 設定読み込み
-    print("[2/5] スイープ設定を確認中 ...")
+    print("[2/6] スイープ設定を確認中 ...")
     config = load_sweep_config(sweep_dir)
     sweep_type, sweep_cols = detect_sweep_type(df)
     subtitle = make_subtitle(config, df)
@@ -482,13 +729,13 @@ def main(argv: list[str] | None = None) -> None:
     print(f"      {subtitle}")
 
     # 図の生成
-    print("[3/5] 平均同色近隣比率を保存中 ...")
+    print("[3/6] 平均同色近隣比率を保存中 ...")
     save_avg_same_ratio(
         df, sweep_type, sweep_cols,
         os.path.join(out_dir, "sweep_avg_same_ratio.png"), subtitle,
     )
 
-    print("[4/5] 異色近隣なし割合・収束ステップ数を保存中 ...")
+    print("[4/6] 異色近隣なし割合・収束ステップ数を保存中 ...")
     save_pct_no_opposite(
         df, sweep_type, sweep_cols,
         os.path.join(out_dir, "sweep_pct_no_opposite.png"), subtitle,
@@ -498,11 +745,24 @@ def main(argv: list[str] | None = None) -> None:
         os.path.join(out_dir, "sweep_convergence.png"), subtitle,
     )
 
-    print("[5/5] 概要パネルを保存中 ...")
+    print("[5/6] 概要パネルを保存中 ...")
     save_overview(
         df, sweep_type, sweep_cols,
         os.path.join(out_dir, "sweep_overview.png"), subtitle,
     )
+
+    if args.no_grid_animation:
+        print("[6/6] グリッドアニメーションをスキップしました")
+    else:
+        print("[6/6] パラメータ組み合わせ別グリッドアニメーションを生成中 ...")
+        save_grid_animation(
+            sweep_dir, df, sweep_type, sweep_cols,
+            os.path.join(out_dir, "sweep_grid_animation.gif"),
+            seed=args.grid_seed,
+            fps=args.fps,
+            max_frames=args.max_frames,
+            subtitle=subtitle,
+        )
 
     print("---------------------------------------------------")
     print("完了．出力ファイル一覧:")
