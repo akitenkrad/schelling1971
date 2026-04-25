@@ -29,10 +29,11 @@ schelling1971/
 ├── tools/                     ← Python プロジェクト (schelling-tools)
 │   ├── pyproject.toml
 │   └── src/schelling_tools/
-│       ├── cli.py             ← 統合 CLI (schelling-tools)
+│       ├── cli.py                       ← 統合 CLI (schelling-tools)
 │       ├── visualize.py
 │       ├── visualize_sweep.py
-│       └── reproduce_paper.py
+│       ├── reproduce_paper.py
+│       └── show_experiment_settings.py  ← 実験設定値の表示
 └── results/                   ← シミュレーション出力 (gitignored)
 ```
 
@@ -270,6 +271,34 @@ results/latest/figures/
 
 - **1Dスイープ**: 折れ線グラフ．複数シードの場合は平均線＋標準偏差のエラーバー＋個別点をプロット
 - **2Dスイープ**: ヒートマップ．セル内に数値をアノテーション
+
+---
+
+### 5. 実験設定値の表示
+
+`schelling-tools show-experiment-settings` は (1) 論文再現実験の定義一覧，または (2) 既存実行結果ディレクトリで使われた設定値を表示する．
+
+```bash
+# 論文再現実験 (Fig. 7-17) の定義一覧を表示（reproduce 実行前のプレビュー用）
+uv run schelling-tools show-experiment-settings
+
+# 特定の実験キーのみ表示（カンマ区切り可）
+uv run schelling-tools show-experiment-settings --only fig11_tau_one_third,fig16_congregationist_min_same_3
+
+# 既存実行結果の設定を表示（results/latest 経由で最新を参照）
+uv run schelling-tools show-experiment-settings --results-dir results/latest
+
+# 特定の実行結果を指定（run / sweep どちらでも自動判別）
+uv run schelling-tools show-experiment-settings --results-dir results/20260425_153000
+
+# JSON 形式で出力
+uv run schelling-tools show-experiment-settings --json
+uv run schelling-tools show-experiment-settings --results-dir results/latest --json
+```
+
+`run` 実行時は `results/{timestamp}/config.json` が，`sweep` 実行時は `results/{timestamp}_sweep/sweep_config.json` が自動生成される．両者は本コマンドが自動判別して整形表示する．
+
+> **注**: 旧バージョン（`config.json` 出力対応前）で生成された結果ディレクトリには設定ファイルが含まれていないため，`--results-dir` モードでは表示できない．その場合は再実行してください．
 
 ---
 

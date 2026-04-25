@@ -229,6 +229,60 @@ struct SweepConfigJson {
     snapshot_interval: usize,
 }
 
+// ---------------------------------------------------------------------------
+// config.json (run 用) の構造体
+// ---------------------------------------------------------------------------
+
+#[derive(serde::Serialize)]
+struct RunConfigJson {
+    command: &'static str,
+    rule: String,
+    rule_kind: &'static str,
+    threshold: Option<f64>,
+    min_same: Option<usize>,
+    max_same: Option<usize>,
+    rows: usize,
+    cols: usize,
+    n_a: usize,
+    n_b: usize,
+    n_vacant: usize,
+    vacant_rate: f64,
+    seed: Option<u64>,
+    max_iterations: usize,
+    snapshot_interval: usize,
+    output_dir: String,
+}
+
+fn run_config_json(cfg: &Config, vacant_rate: f64) -> RunConfigJson {
+    let total = cfg.rows * cfg.cols;
+    let n_vacant = total.saturating_sub(cfg.n_a + cfg.n_b);
+    let (rule_kind, threshold, min_same, max_same) = match cfg.rule {
+        SatisfactionRule::Ratio { threshold } => ("ratio", Some(threshold), None, None),
+        SatisfactionRule::MinSame { min_same } => ("min-same", None, Some(min_same), None),
+        SatisfactionRule::Bounded { min_same, max_same } => {
+            ("bounded", None, Some(min_same), Some(max_same))
+        }
+    };
+    RunConfigJson {
+        command: "run",
+        rule: cfg.rule.label(),
+        rule_kind,
+        threshold,
+        min_same,
+        max_same,
+        rows: cfg.rows,
+        cols: cfg.cols,
+        n_a: cfg.n_a,
+        n_b: cfg.n_b,
+        n_vacant,
+        vacant_rate,
+        seed: cfg.seed,
+        max_iterations: cfg.max_iterations,
+        snapshot_interval: cfg.snapshot_interval,
+        output_dir: cfg.output_dir.clone(),
+    }
+}
+
 /// レンジ文字列をJSONに変換する（range → {start, stop, step}，単一値 → 数値）
 fn range_to_json(s: &str) -> serde_json::Value {
     let parts: Vec<&str> = s.split(':').collect();
@@ -296,6 +350,14 @@ fn cmd_run(args: RunArgs) {
     let result = run(&cfg);
     save_metrics(&result.metrics_history, &cfg.output_dir);
 
+    // config.json を保存
+    {
+        let path = format!("{}/config.json", cfg.output_dir);
+        let file = File::create(&path).expect("config.json の作成に失敗");
+        serde_json::to_writer_pretty(BufWriter::new(file), &run_config_json(&cfg, args.vacant_rate))
+            .expect("config.json の書き込みに失敗");
+    }
+
     // latest シンボリックリンクを作成・更新
     let symlink_path = Path::new(&args.output_dir).join("latest");
     if symlink_path.is_symlink() {
@@ -320,6 +382,7 @@ fn cmd_run(args: RunArgs) {
     );
     println!("異色近隣なし割合: {:.1}%", last.pct_no_opposite);
     println!("メトリクス → {}/metrics.csv", cfg.output_dir);
+    println!("設定       → {}/config.json", cfg.output_dir);
     println!("スナップショット → {}/snapshots/", cfg.output_dir);
 }
 
