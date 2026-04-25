@@ -1,3 +1,4 @@
+mod analytic;
 mod config;
 mod grid;
 mod metrics;
@@ -12,6 +13,14 @@ use clap::{Parser, Subcommand};
 use config::{Config, SatisfactionRule};
 use csv::Writer;
 use simulation::{run, save_metrics};
+
+use analytic::dynamics::{DynamicsConfig, FlowModel};
+use analytic::phase::PhaseConfig;
+use analytic::runner::{
+    cmd_bnm, cmd_bnm_basin, cmd_tipping, BnmBasinArgs, BnmRunArgs, TippingRunArgs,
+};
+use analytic::tipping::{FlowAsymmetry, Speculation, TippingConfig};
+use analytic::tolerance::ToleranceSchedule;
 
 // ---------------------------------------------------------------------------
 // CLI 定義
@@ -33,6 +42,12 @@ enum Commands {
     Run(RunArgs),
     /// パラメータ感度解析（グリッドサーチ）を実行する
     Sweep(SweepArgs),
+    /// 境界近隣モデル（解析モデル）の単発実行
+    Bnm(BnmArgs),
+    /// 境界近隣モデルの吸引域解析（初期条件グリッド掃き）
+    BnmBasin(BnmBasinCliArgs),
+    /// ティッピングモデル（投機・非対称・チャネリングを含む拡張動学）
+    Tipping(TippingArgs),
 }
 
 #[derive(Parser, Debug)]
@@ -116,6 +131,387 @@ struct SweepArgs {
     /// 結果出力ベースディレクトリ
     #[arg(long, default_value = "results")]
     output_dir: String,
+}
+
+// ---------------------------------------------------------------------------
+// BNM 関連の CLI 引数
+// ---------------------------------------------------------------------------
+
+#[derive(Parser, Debug)]
+struct BnmArgs {
+    /// プリセット名 (fig18 / fig19 / fig22 / fig23)．省略時は --w-tolerance 等を要求．
+    #[arg(long)]
+    preset: Option<String>,
+
+    /// W 集団の許容スケジュール．"linear:r_max=2.0:pop_max=100" 形式．
+    /// preset 指定時は上書きとして機能する．
+    #[arg(long)]
+    w_tolerance: Option<String>,
+
+    /// B 集団の許容スケジュール．
+    #[arg(long)]
+    b_tolerance: Option<String>,
+
+    /// 容量制約 W+B<=C．省略時は無制約．
+    #[arg(long)]
+    capacity: Option<f64>,
+
+    /// 初期値 "W,B"．preset 指定時は preset の default_init が使われる．
+    #[arg(long)]
+    init: Option<String>,
+
+    /// 流速モデル: "continuous:k_w=1.0:k_b=1.0:dt=0.1" / "discrete"
+    #[arg(long, default_value = "continuous:k_w=1.0:k_b=1.0:dt=0.1")]
+    flow: String,
+
+    /// 最大ステップ数
+    #[arg(long, default_value_t = 5000)]
+    max_steps: usize,
+
+    /// 収束許容誤差
+    #[arg(long, default_value_t = 1e-4)]
+    convergence_tol: f64,
+
+    /// 結果出力ディレクトリ
+    #[arg(long, default_value = "results")]
+    output_dir: String,
+}
+
+#[derive(Parser, Debug)]
+struct TippingArgs {
+    /// プリセット名 (fig30a / fig30b / fig31 / fig32 など)．
+    #[arg(long)]
+    preset: Option<String>,
+
+    #[arg(long)]
+    w_tolerance: Option<String>,
+
+    #[arg(long)]
+    b_tolerance: Option<String>,
+
+    #[arg(long)]
+    capacity: Option<f64>,
+
+    #[arg(long)]
+    init: Option<String>,
+
+    /// 投機モデル: "none" / "linear:alpha=0.3" / "trend:window=5:weight=0.5"
+    #[arg(long, default_value = "none")]
+    speculation: String,
+
+    /// 流速非対称: "w_in=1.0:w_out=1.0:b_in=1.0:b_out=1.0" (省略時は対称)
+    #[arg(long)]
+    asymmetry: Option<String>,
+
+    /// チャネリング (実効容量縮小係数 0..=1)．capacity と併用．
+    #[arg(long)]
+    channeling: Option<f64>,
+
+    #[arg(long, default_value = "continuous:k_w=1.0:k_b=1.0:dt=0.1")]
+    flow: String,
+
+    #[arg(long, default_value_t = 5000)]
+    max_steps: usize,
+
+    #[arg(long, default_value_t = 1e-4)]
+    convergence_tol: f64,
+
+    #[arg(long, default_value = "results")]
+    output_dir: String,
+}
+
+#[derive(Parser, Debug)]
+struct BnmBasinCliArgs {
+    #[arg(long)]
+    preset: Option<String>,
+
+    #[arg(long)]
+    w_tolerance: Option<String>,
+
+    #[arg(long)]
+    b_tolerance: Option<String>,
+
+    #[arg(long)]
+    capacity: Option<f64>,
+
+    /// 初期条件グリッドの分割数 "n_w x n_b"．
+    #[arg(long, default_value = "20x20")]
+    init_grid: String,
+
+    #[arg(long, default_value = "continuous:k_w=1.0:k_b=1.0:dt=0.1")]
+    flow: String,
+
+    #[arg(long, default_value_t = 3000)]
+    max_steps: usize,
+
+    #[arg(long, default_value_t = 1e-3)]
+    convergence_tol: f64,
+
+    #[arg(long, default_value = "results")]
+    output_dir: String,
+}
+
+// ---------------------------------------------------------------------------
+// BNM 引数パーサ
+// ---------------------------------------------------------------------------
+
+/// "linear:r_max=2.0:pop_max=100" 等の文字列を ToleranceSchedule にパースする．
+fn parse_tolerance_string(s: &str) -> ToleranceSchedule {
+    let parts: Vec<&str> = s.split(':').collect();
+    let kind = parts[0];
+    let mut kwargs: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
+    for kv in &parts[1..] {
+        let mut it = kv.splitn(2, '=');
+        let k = it.next().expect("key=value 形式が必要").to_string();
+        let v: f64 = it
+            .next()
+            .expect("key=value 形式が必要")
+            .parse()
+            .expect("数値のパースに失敗");
+        kwargs.insert(k, v);
+    }
+    let pop_max = *kwargs.get("pop_max").expect("pop_max が必要");
+    match kind {
+        "linear" => {
+            let r_max = *kwargs.get("r_max").expect("r_max が必要");
+            ToleranceSchedule::Linear { r_max, pop_max }
+        }
+        "affine" => {
+            let intercept_pop = *kwargs.get("intercept_pop").unwrap_or(&0.0);
+            let slope = *kwargs.get("slope").expect("slope が必要");
+            ToleranceSchedule::Affine {
+                intercept_pop,
+                slope,
+                pop_max,
+            }
+        }
+        _ => panic!("未対応のスケジュール種別: \"{}\" (linear / affine)", kind),
+    }
+}
+
+/// "continuous:k_w=1.0:k_b=1.0:dt=0.1" / "discrete" を FlowModel にパースする．
+fn parse_flow_string(s: &str) -> FlowModel {
+    let parts: Vec<&str> = s.split(':').collect();
+    match parts[0] {
+        "continuous" => {
+            let mut kwargs: std::collections::HashMap<String, f64> =
+                std::collections::HashMap::new();
+            for kv in &parts[1..] {
+                let mut it = kv.splitn(2, '=');
+                let k = it.next().expect("key=value 形式が必要").to_string();
+                let v: f64 = it
+                    .next()
+                    .expect("key=value 形式が必要")
+                    .parse()
+                    .expect("数値のパースに失敗");
+                kwargs.insert(k, v);
+            }
+            FlowModel::Continuous {
+                k_w: *kwargs.get("k_w").unwrap_or(&1.0),
+                k_b: *kwargs.get("k_b").unwrap_or(&1.0),
+                dt: *kwargs.get("dt").unwrap_or(&0.1),
+            }
+        }
+        "discrete" => FlowModel::DiscreteBatch,
+        _ => panic!("未対応の flow 種別: \"{}\" (continuous / discrete)", parts[0]),
+    }
+}
+
+/// "W,B" を tuple にパースする．
+fn parse_init_string(s: &str) -> (f64, f64) {
+    let parts: Vec<&str> = s.split(',').collect();
+    assert_eq!(parts.len(), 2, "init は \"W,B\" 形式");
+    let w: f64 = parts[0].trim().parse().expect("W のパースに失敗");
+    let b: f64 = parts[1].trim().parse().expect("B のパースに失敗");
+    (w, b)
+}
+
+/// "20x20" を (20, 20) にパースする．
+fn parse_grid_string(s: &str) -> (usize, usize) {
+    let parts: Vec<&str> = s.split('x').collect();
+    assert_eq!(parts.len(), 2, "init-grid は \"NxM\" 形式");
+    let n: usize = parts[0].trim().parse().expect("N のパースに失敗");
+    let m: usize = parts[1].trim().parse().expect("M のパースに失敗");
+    (n, m)
+}
+
+/// BnmArgs から PhaseConfig + 初期値 + プリセット名 を組み立てる．
+fn build_bnm_inputs(
+    preset: Option<String>,
+    w_tol: Option<String>,
+    b_tol: Option<String>,
+    capacity: Option<f64>,
+    init: Option<String>,
+) -> (Option<String>, PhaseConfig, (f64, f64)) {
+    if let Some(name) = &preset {
+        let p = analytic::preset::lookup(name).unwrap_or_else(|| {
+            panic!(
+                "未知のプリセット: \"{}\" (利用可能: {:?})",
+                name,
+                analytic::preset::all_names()
+            )
+        });
+        let mut phase = p.phase;
+        if let Some(s) = w_tol {
+            phase.w_schedule = parse_tolerance_string(&s);
+        }
+        if let Some(s) = b_tol {
+            phase.b_schedule = parse_tolerance_string(&s);
+        }
+        if let Some(c) = capacity {
+            phase.capacity = Some(c);
+        }
+        let init = init
+            .map(|s| parse_init_string(&s))
+            .unwrap_or(p.default_init);
+        (Some(name.clone()), phase, init)
+    } else {
+        let w_schedule =
+            parse_tolerance_string(&w_tol.expect("preset 未指定時は --w-tolerance が必要"));
+        let b_schedule =
+            parse_tolerance_string(&b_tol.expect("preset 未指定時は --b-tolerance が必要"));
+        let phase = PhaseConfig {
+            w_schedule,
+            b_schedule,
+            capacity,
+        };
+        let init = init.map(|s| parse_init_string(&s)).unwrap_or((0.0, 0.0));
+        (None, phase, init)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// BNM サブコマンド本体
+// ---------------------------------------------------------------------------
+
+fn cmd_bnm_dispatch(args: BnmArgs) {
+    let (preset_name, phase, init) =
+        build_bnm_inputs(args.preset, args.w_tolerance, args.b_tolerance, args.capacity, args.init);
+    let dynamics = DynamicsConfig {
+        flow: parse_flow_string(&args.flow),
+        max_steps: args.max_steps,
+        convergence_tol: args.convergence_tol,
+    };
+    cmd_bnm(BnmRunArgs {
+        preset_name,
+        phase,
+        dynamics,
+        init,
+        output_base: args.output_dir,
+    });
+}
+
+/// 投機文字列をパース．
+fn parse_speculation_string(s: &str) -> Speculation {
+    let parts: Vec<&str> = s.split(':').collect();
+    match parts[0] {
+        "none" => Speculation::None,
+        "linear" => {
+            let mut alpha = 0.0_f64;
+            for kv in &parts[1..] {
+                let mut it = kv.splitn(2, '=');
+                let k = it.next().unwrap_or("");
+                let v: f64 = it.next().unwrap_or("0").parse().unwrap_or(0.0);
+                if k == "alpha" {
+                    alpha = v;
+                }
+            }
+            Speculation::Linear { alpha }
+        }
+        "trend" => {
+            let mut window = 5_usize;
+            let mut weight = 0.5_f64;
+            for kv in &parts[1..] {
+                let mut it = kv.splitn(2, '=');
+                let k = it.next().unwrap_or("");
+                let v = it.next().unwrap_or("0");
+                match k {
+                    "window" => window = v.parse().unwrap_or(5),
+                    "weight" => weight = v.parse().unwrap_or(0.5),
+                    _ => {}
+                }
+            }
+            Speculation::Trend { window, weight }
+        }
+        _ => panic!("未対応の投機モデル: \"{}\" (none / linear / trend)", parts[0]),
+    }
+}
+
+/// 流速非対称文字列をパース．
+fn parse_asymmetry_string(s: &str) -> FlowAsymmetry {
+    let mut a = FlowAsymmetry {
+        w_inflow: 1.0,
+        w_outflow: 1.0,
+        b_inflow: 1.0,
+        b_outflow: 1.0,
+    };
+    for kv in s.split(':') {
+        let mut it = kv.splitn(2, '=');
+        let k = it.next().unwrap_or("");
+        let v: f64 = it.next().unwrap_or("1").parse().unwrap_or(1.0);
+        match k {
+            "w_in" => a.w_inflow = v,
+            "w_out" => a.w_outflow = v,
+            "b_in" => a.b_inflow = v,
+            "b_out" => a.b_outflow = v,
+            _ => panic!("未対応のキー: \"{}\" (w_in/w_out/b_in/b_out)", k),
+        }
+    }
+    a
+}
+
+fn cmd_tipping_dispatch(args: TippingArgs) {
+    let (preset_name, phase, init) = build_bnm_inputs(
+        args.preset,
+        args.w_tolerance,
+        args.b_tolerance,
+        args.capacity,
+        args.init,
+    );
+    let dynamics = DynamicsConfig {
+        flow: parse_flow_string(&args.flow),
+        max_steps: args.max_steps,
+        convergence_tol: args.convergence_tol,
+    };
+    let speculation = parse_speculation_string(&args.speculation);
+    let asymmetry = args.asymmetry.map(|s| parse_asymmetry_string(&s));
+    let tipping = TippingConfig {
+        phase,
+        dynamics,
+        speculation,
+        asymmetry,
+        channeling: args.channeling,
+    };
+    cmd_tipping(TippingRunArgs {
+        preset_name,
+        tipping,
+        init,
+        output_base: args.output_dir,
+    });
+}
+
+fn cmd_bnm_basin_dispatch(args: BnmBasinCliArgs) {
+    let (preset_name, phase, _) = build_bnm_inputs(
+        args.preset,
+        args.w_tolerance,
+        args.b_tolerance,
+        args.capacity,
+        None,
+    );
+    let dynamics = DynamicsConfig {
+        flow: parse_flow_string(&args.flow),
+        max_steps: args.max_steps,
+        convergence_tol: args.convergence_tol,
+    };
+    let (n_w, n_b) = parse_grid_string(&args.init_grid);
+    cmd_bnm_basin(BnmBasinArgs {
+        preset_name,
+        phase,
+        dynamics,
+        n_w,
+        n_b,
+        output_base: args.output_dir,
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -585,7 +981,16 @@ fn main() {
     // 第1引数がサブコマンド名かどうかで分岐
     let has_subcommand = args
         .get(1)
-        .map(|a| a == "run" || a == "sweep" || a == "help" || a == "--help" || a == "-h")
+        .map(|a| {
+            a == "run"
+                || a == "sweep"
+                || a == "bnm"
+                || a == "bnm-basin"
+                || a == "tipping"
+                || a == "help"
+                || a == "--help"
+                || a == "-h"
+        })
         .unwrap_or(false);
 
     if has_subcommand {
@@ -593,6 +998,9 @@ fn main() {
         match cli.command {
             Some(Commands::Run(run_args)) => cmd_run(run_args),
             Some(Commands::Sweep(sweep_args)) => cmd_sweep(sweep_args),
+            Some(Commands::Bnm(bnm_args)) => cmd_bnm_dispatch(bnm_args),
+            Some(Commands::BnmBasin(basin_args)) => cmd_bnm_basin_dispatch(basin_args),
+            Some(Commands::Tipping(tipping_args)) => cmd_tipping_dispatch(tipping_args),
             None => cmd_run(RunArgs::parse_from(args.iter().take(1))),
         }
     } else {

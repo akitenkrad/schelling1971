@@ -147,6 +147,112 @@ def tau_sweep_taus() -> list[float]:
 
 
 # ---------------------------------------------------------------------------
+# 解析モデル (BNM + Tipping) 実験定義
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class AnalyticExperiment:
+    """解析モデル (BNM / Tipping) の単一実験．"""
+
+    key: str
+    figure: str
+    description: str
+    model: str  # "bnm" / "tipping"
+    preset: str
+    init: tuple[float, float] | None = None
+    # 期待値: 平衡点の (種類, 安定性) リスト，ティッピング類型 (任意)
+    expected_equilibria: list[tuple[str, str]] | None = None  # [("all_white","stable"), ...]
+    expected_tipping_type: str | None = None  # "in_tipping_only" 等
+    # 期待される収束先 (軌跡)
+    expected_converged_kind: str | None = None
+
+
+def analytic_experiments() -> list[AnalyticExperiment]:
+    return [
+        AnalyticExperiment(
+            key="fig18_linear_two_to_one",
+            figure="Fig. 18",
+            description="直線型・1:2 比 — 端点2均衡 + 不安定混合．",
+            model="bnm",
+            preset="fig18",
+            init=(50.0, 25.0),
+            expected_equilibria=[
+                ("all_white", "stable"),
+                ("all_black", "stable"),
+                ("mixed", "unstable"),
+            ],
+        ),
+        AnalyticExperiment(
+            key="fig19_steep_three_stable",
+            figure="Fig. 19",
+            description="急勾配スケジュール (中央値=1.5) — 3 安定均衡．",
+            model="bnm",
+            preset="fig19",
+            init=(60.0, 60.0),
+            expected_equilibria=[
+                ("all_white", "stable"),
+                ("all_black", "stable"),
+                ("mixed", "stable"),
+            ],
+            expected_converged_kind="mixed",
+        ),
+        AnalyticExperiment(
+            key="fig22_unequal_no_intersection",
+            figure="Fig. 22",
+            description="不等数 — 反応曲線非交差で混合均衡なし．",
+            model="bnm",
+            preset="fig22",
+            init=(60.0, 30.0),
+        ),
+        AnalyticExperiment(
+            key="fig23_limiting_numbers",
+            figure="Fig. 23",
+            description="入域上限クオータで混合均衡が生まれる．",
+            model="bnm",
+            preset="fig23",
+            init=(50.0, 15.0),
+        ),
+        AnalyticExperiment(
+            key="fig30a_in_tipping_only",
+            figure="Fig. 30a",
+            description="in-tipping のみ．B 反応曲線が全W点を覆う．",
+            model="tipping",
+            preset="fig30a",
+            expected_tipping_type="in_tipping_only",
+        ),
+        AnalyticExperiment(
+            key="fig30b_out_tipping_only",
+            figure="Fig. 30b",
+            description="out-tipping のみ (Fig.18 と同じ構造)．",
+            model="tipping",
+            preset="fig30b",
+            expected_tipping_type="out_tipping_only",
+        ),
+        AnalyticExperiment(
+            key="fig31_both_tipping",
+            figure="Fig. 31",
+            description="in-tipping + out-tipping (典型ホワイトフライト)．",
+            model="tipping",
+            preset="fig31",
+            init=(100.0, 15.0),
+            expected_tipping_type="both",
+            expected_converged_kind="all_black",
+        ),
+        AnalyticExperiment(
+            key="fig32_neither_tipping",
+            figure="Fig. 32",
+            description="ティッピングなし (頑健な多相安定)．",
+            model="tipping",
+            preset="fig32",
+            init=(60.0, 60.0),
+            expected_tipping_type="neither",
+            expected_converged_kind="mixed",
+        ),
+    ]
+
+
+# ---------------------------------------------------------------------------
 # Rustバイナリ呼び出し
 # ---------------------------------------------------------------------------
 
@@ -279,6 +385,117 @@ def run_experiment(exp: Experiment, seeds: list[int], base_dir: Path) -> dict:
     }
 
 
+def run_analytic_experiment(exp: AnalyticExperiment, base_dir: Path) -> dict:
+    """1つの解析モデル実験を実行する (BNM または Tipping)．"""
+    exp_dir = base_dir / exp.key
+    exp_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"--- {exp.figure}: {exp.description} ---")
+    print(f"    モデル={exp.model} | プリセット={exp.preset} | init={exp.init}")
+
+    args = [
+        "cargo", "run", "--release", "--quiet", "--",
+        exp.model,
+        "--preset", exp.preset,
+        "--output-dir", str(exp_dir.relative_to(PROJECT_ROOT)),
+    ]
+    if exp.init is not None:
+        args += ["--init", f"{exp.init[0]},{exp.init[1]}"]
+    run_cargo(args, cwd=PROJECT_ROOT)
+
+    # 出力を解析: results/{ts}_{model} ディレクトリを探す
+    candidates = sorted(
+        [p for p in exp_dir.iterdir() if p.is_dir() and p.name != "latest"],
+        key=lambda p: p.stat().st_mtime,
+    )
+    if not candidates:
+        raise FileNotFoundError(f"出力ディレクトリが見つかりません: {exp_dir}")
+    run_dir = candidates[-1]
+
+    # equilibria.csv
+    eq_path = run_dir / "equilibria.csv"
+    equilibria = []
+    if eq_path.exists():
+        with eq_path.open() as f:
+            for row in csv.DictReader(f):
+                equilibria.append({
+                    "w": float(row["w"]),
+                    "b": float(row["b"]),
+                    "kind": row["kind"],
+                    "stability": row["stability"],
+                })
+
+    # trajectory.csv (終点)
+    traj_path = run_dir / "trajectory.csv"
+    traj_final = None
+    if traj_path.exists():
+        with traj_path.open() as f:
+            rows = list(csv.DictReader(f))
+        if rows:
+            last = rows[-1]
+            traj_final = {
+                "t": float(last["t"]),
+                "w": float(last["w"]),
+                "b": float(last["b"]),
+                "n_steps": len(rows) - 1,
+            }
+
+    # tipping_classification.json
+    cls_path = run_dir / "tipping_classification.json"
+    classification = None
+    if cls_path.exists():
+        with cls_path.open() as f:
+            classification = json.load(f)
+
+    # 期待値との照合
+    eq_kinds_observed = {(e["kind"], e["stability"]) for e in equilibria}
+    eq_match = None
+    if exp.expected_equilibria is not None:
+        eq_match = all(tuple(p) in eq_kinds_observed for p in exp.expected_equilibria)
+    tipping_match = None
+    if exp.expected_tipping_type is not None and classification is not None:
+        tipping_match = classification.get("type") == exp.expected_tipping_type
+    converged_match = None
+    if exp.expected_converged_kind is not None and traj_final is not None:
+        # 終点が期待される平衡点に近いか (閾値 5%)
+        target = next(
+            (e for e in equilibria if e["kind"] == exp.expected_converged_kind
+             and e["stability"] == "stable"),
+            None,
+        )
+        if target is not None:
+            scale = max(50.0, max(e["w"] + e["b"] for e in equilibria))
+            d = ((target["w"] - traj_final["w"]) ** 2 +
+                 (target["b"] - traj_final["b"]) ** 2) ** 0.5
+            converged_match = d < 0.05 * scale
+
+    print(f"    平衡点: {len(equilibria)} 個")
+    if classification is not None:
+        print(f"    ティッピング類型: {classification.get('type')}")
+    if traj_final is not None:
+        print(f"    軌跡終点: ({traj_final['w']:.2f}, {traj_final['b']:.2f}) "
+              f"({traj_final['n_steps']} ステップ)")
+
+    return {
+        "experiment": exp.key,
+        "figure": exp.figure,
+        "description": exp.description,
+        "model": exp.model,
+        "preset": exp.preset,
+        "init": exp.init,
+        "equilibria": equilibria,
+        "trajectory_final": traj_final,
+        "classification": classification,
+        "expected_equilibria": exp.expected_equilibria,
+        "expected_tipping_type": exp.expected_tipping_type,
+        "expected_converged_kind": exp.expected_converged_kind,
+        "match_equilibria": eq_match,
+        "match_tipping_type": tipping_match,
+        "match_converged_kind": converged_match,
+        "run_dir": str(run_dir.relative_to(PROJECT_ROOT)),
+    }
+
+
 def run_tau_sweep(seeds: list[int], base_dir: Path) -> dict:
     """Fig. 14 相当: τ=0.10-0.60 でスイープを実行し，均衡同色比率の非線形性を再現する．"""
     sweep_dir = base_dir / "fig14_tau_sweep"
@@ -366,6 +583,42 @@ def _in_range(value: float, rng: tuple[float, float] | None) -> str:
     return "✓" if rng[0] <= value <= rng[1] else "✗"
 
 
+def render_analytic_comparison(experiments: list[dict]) -> str:
+    """解析モデル (BNM + Tipping) の再現結果サマリ．"""
+    if not experiments:
+        return ""
+    lines = []
+    lines.append("=" * 90)
+    lines.append("解析モデル (BNM + Tipping) 再現結果")
+    lines.append("=" * 90)
+    lines.append(f"{'Figure':<10}{'モデル':<10}{'平衡点':<10}{'類型':<22}{'軌跡照合':<12}")
+    lines.append("-" * 90)
+
+    for exp in experiments:
+        n_eq = len(exp["equilibria"])
+        cls = exp["classification"]
+        cls_label = cls.get("type") if cls else "-"
+        if exp["expected_tipping_type"] is not None:
+            mark = "✓" if exp["match_tipping_type"] else "✗"
+            cls_label = f"{cls_label} {mark}"
+
+        eq_label = f"{n_eq} 個"
+        if exp["expected_equilibria"] is not None:
+            mark = "✓" if exp["match_equilibria"] else "✗"
+            eq_label = f"{eq_label} {mark}"
+
+        traj_label = "-"
+        if exp["match_converged_kind"] is not None:
+            mark = "✓" if exp["match_converged_kind"] else "✗"
+            traj_label = f"{exp['expected_converged_kind']} {mark}"
+
+        lines.append(f"{exp['figure']:<10}{exp['model']:<10}"
+                     f"{eq_label:<10}{cls_label:<22}{traj_label:<12}")
+
+    lines.append("=" * 90)
+    return "\n".join(lines)
+
+
 def render_comparison(experiments: list[dict], tau_sweep: dict | None) -> str:
     lines = []
     lines.append("=" * 90)
@@ -439,6 +692,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="cargo build --release をスキップ")
     parser.add_argument("--skip-sweep", action="store_true",
                         help="τ感度解析 (Fig. 14) をスキップ")
+    parser.add_argument("--skip-analytic", action="store_true",
+                        help="解析モデル (BNM + Tipping, Fig. 18-32) をスキップ")
+    parser.add_argument("--analytic-only", action="store_true",
+                        help="解析モデルのみ実行（空間モデルとτ感度解析をスキップ）")
     parser.add_argument("--only", default=None,
                         help="指定したexperiment keyのみ実行 (カンマ区切り可)")
     args = parser.parse_args(argv)
@@ -459,12 +716,17 @@ def main(argv: list[str] | None = None) -> int:
         ensure_build()
 
     experiments = paper_experiments()
+    analytic_exps = analytic_experiments()
     if args.only:
         wanted = {s.strip() for s in args.only.split(",")}
         experiments = [e for e in experiments if e.key in wanted]
-        if not experiments:
+        analytic_exps = [e for e in analytic_exps if e.key in wanted]
+        if not experiments and not analytic_exps:
             print(f"エラー: --only で指定されたキーが見つかりません: {args.only}", file=sys.stderr)
             return 1
+
+    if args.analytic_only:
+        experiments = []
 
     results = []
     for exp in experiments:
@@ -472,12 +734,21 @@ def main(argv: list[str] | None = None) -> int:
         print()
 
     tau_sweep = None
-    if not args.skip_sweep and not args.only:
+    if not args.skip_sweep and not args.only and not args.analytic_only:
         tau_sweep = run_tau_sweep(seeds, base_dir)
         print()
 
+    analytic_results: list[dict] = []
+    if not args.skip_analytic:
+        for aexp in analytic_exps:
+            analytic_results.append(run_analytic_experiment(aexp, base_dir))
+            print()
+
     # レポート出力
-    report = render_comparison(results, tau_sweep)
+    report_parts = [render_comparison(results, tau_sweep)] if results or tau_sweep else []
+    if analytic_results:
+        report_parts.append(render_analytic_comparison(analytic_results))
+    report = "\n\n".join(report_parts)
     print(report)
 
     # サマリ保存
@@ -486,6 +757,7 @@ def main(argv: list[str] | None = None) -> int:
         "seeds": seeds,
         "experiments": results,
         "tau_sweep": tau_sweep,
+        "analytic_experiments": analytic_results,
     }
     summary_path = base_dir / "reproduction_summary.json"
     with summary_path.open("w") as f:

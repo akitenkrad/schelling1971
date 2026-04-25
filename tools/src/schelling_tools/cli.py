@@ -3,6 +3,7 @@
 Usage:
     schelling-tools visualize [...]
     schelling-tools visualize-sweep [...]
+    schelling-tools visualize-bnm [...]
     schelling-tools reproduce [...]
     schelling-tools show-experiment-settings [...]
 
@@ -23,6 +24,8 @@ def main(argv: list[str] | None = None) -> None:
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("visualize", help="単一実行結果の可視化", add_help=False)
     subparsers.add_parser("visualize-sweep", help="スイープ結果の可視化", add_help=False)
+    subparsers.add_parser("visualize-bnm", help="境界近隣モデル (BNM) の可視化", add_help=False)
+    subparsers.add_parser("visualize-tipping", help="ティッピングモデルの可視化", add_help=False)
     subparsers.add_parser("reproduce", help="論文 Fig.7-17 の一括再現", add_help=False)
     subparsers.add_parser(
         "show-experiment-settings",
@@ -42,6 +45,12 @@ def main(argv: list[str] | None = None) -> None:
         run_main(rest)
     elif command == "visualize-sweep":
         from schelling_tools.visualize_sweep import main as run_main
+        run_main(rest)
+    elif command == "visualize-bnm":
+        from schelling_tools.visualize_bnm import main as run_main
+        run_main(rest)
+    elif command == "visualize-tipping":
+        from schelling_tools.visualize_tipping import main as run_main
         run_main(rest)
     elif command == "reproduce":
         from schelling_tools.reproduce_paper import main as run_main
