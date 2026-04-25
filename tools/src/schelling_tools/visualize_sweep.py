@@ -433,23 +433,24 @@ def save_overview(
 # --------------------------------------------------------------------------- #
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(
+        prog="schelling-tools visualize-sweep",
         description="Schelling 分離モデル パラメータスイープ 可視化スクリプト"
     )
     p.add_argument(
-        "--sweep_dir", default="results/latest",
+        "--sweep_dir", "--sweep-dir", default="results/latest",
         help="スイープ結果のディレクトリ (default: results/latest)",
     )
     p.add_argument(
-        "--output_dir", default=None,
+        "--output_dir", "--output-dir", default=None,
         help="図の保存先ディレクトリ (default: {sweep_dir}/figures)",
     )
-    return p.parse_args()
+    return p.parse_args(argv)
 
 
-def main() -> None:
-    args = parse_args()
+def main(argv: list[str] | None = None) -> None:
+    args = parse_args(argv)
 
     sweep_dir = args.sweep_dir
     out_dir = args.output_dir if args.output_dir else os.path.join(sweep_dir, "figures")

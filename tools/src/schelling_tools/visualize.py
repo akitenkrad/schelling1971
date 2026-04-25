@@ -331,16 +331,17 @@ def save_animation(
 # メイン
 # --------------------------------------------------------------------------- #
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(
+        prog="schelling-tools visualize",
         description="Schelling 分離モデル 可視化スクリプト"
     )
     p.add_argument(
-        "--results_dir", default="results/latest",
+        "--results_dir", "--results-dir", default="results/latest",
         help="Rustシミュレーションの出力ディレクトリ (default: results/latest)"
     )
     p.add_argument(
-        "--output_dir", default=None,
+        "--output_dir", "--output-dir", default=None,
         help="図の保存先ディレクトリ (default: {results_dir}/figures)"
     )
     p.add_argument(
@@ -348,18 +349,18 @@ def parse_args() -> argparse.Namespace:
         help="アニメーションのFPS (default: 5)"
     )
     p.add_argument(
-        "--no_animation", action="store_true",
+        "--no_animation", "--no-animation", action="store_true",
         help="アニメーションの生成をスキップする"
     )
     p.add_argument(
-        "--max_frames", type=int, default=0,
+        "--max_frames", "--max-frames", type=int, default=0,
         help="アニメーションの最大フレーム数 (0=全フレーム)"
     )
-    return p.parse_args()
+    return p.parse_args(argv)
 
 
-def main() -> None:
-    args = parse_args()
+def main(argv: list[str] | None = None) -> None:
+    args = parse_args(argv)
 
     snapshots_dir = os.path.join(args.results_dir, "snapshots")
     metrics_path  = os.path.join(args.results_dir, "metrics.csv")

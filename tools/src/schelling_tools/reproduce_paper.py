@@ -151,7 +151,16 @@ def tau_sweep_taus() -> list[float]:
 # ---------------------------------------------------------------------------
 
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+# プロジェクトルート (workspace root) を特定する．
+# 本モジュールは tools/src/schelling_tools/reproduce_paper.py にあるので，
+# `parents[3]` が workspace ルートとなる．
+# 環境変数 SCHELLING_PROJECT_ROOT で上書き可能．
+import os as _os
+_env_root = _os.environ.get("SCHELLING_PROJECT_ROOT")
+if _env_root:
+    PROJECT_ROOT = Path(_env_root).resolve()
+else:
+    PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
 def ensure_build() -> None:
@@ -416,8 +425,12 @@ def render_comparison(experiments: list[dict], tau_sweep: dict | None) -> str:
 # ---------------------------------------------------------------------------
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="schelling-tools reproduce",
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument("--seeds", default="42,123,456,789,2024",
                         help="カンマ区切りの乱数シード (デフォルト: 5個)")
     parser.add_argument("--output-dir", default="results/paper_reproduction",
@@ -428,7 +441,7 @@ def main() -> int:
                         help="τ感度解析 (Fig. 14) をスキップ")
     parser.add_argument("--only", default=None,
                         help="指定したexperiment keyのみ実行 (カンマ区切り可)")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     seeds = [int(s.strip()) for s in args.seeds.split(",")]
 
