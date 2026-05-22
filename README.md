@@ -27,9 +27,11 @@ schelling1971/
 │   └── src/
 │       ├── main.rs                     ← CLI (run / sweep / bnm / bnm-basin / tipping)
 │       ├── config.rs                   ← 空間モデル設定
-│       ├── grid.rs                     ← グリッド + ムーア近傍
+│       ├── grid.rs                     ← Cell 型 (グリッドは socsim-grid に委譲)
 │       ├── metrics.rs                  ← 分離度指標
-│       ├── simulation.rs               ← 空間モデル動学
+│       ├── world.rs                    ← socsim WorldState 実装 (socsim-grid GridIndex + 色マップ)
+│       ├── mechanisms.rs               ← socsim Mechanism 実装 (移動規則 + scratch/request_stop)
+│       ├── simulation.rs               ← 空間モデル動学 (socsim エンジン駆動)
 │       └── analytic/                   ← 解析モデル (BNM + Tipping)
 │           ├── tolerance.rs            ← 許容限界スケジュール (CDF)
 │           ├── reaction.rs             ← 反応曲線 B_W(W)
@@ -53,6 +55,8 @@ schelling1971/
 
 - `cargo run` はワークスペースルートから `simulation` クレートを起動する（`-p schelling-simulation` は省略可，メンバーが 1 つのため）．
 - `uv run` は uv workspace のメンバー `tools` が公開する `schelling-tools` コマンドを呼び出す．
+- 空間モデル（`run` / `sweep`）のシミュレーションエンジンは社会シミュレーション基盤 [rs-social-simulation-tools](https://github.com/akitenkrad/rs-social-simulation-tools)（socsim）の上に構築されている（git 依存，commit は `Cargo.lock` で固定）．使用している主な API は次のとおり：`WorldState` / `Mechanism` / `Scheduler` / `SimRng`（エンジン中核），`socsim-grid` の `Grid` / `GridIndex`（格子・ムーア近傍・空きセル探索），`StepContext::request_stop` / `Simulation::stop_requested`（収束による早期停止），`StepContext::scratch`（ステップ結果の受け渡し），`derive_seed`（初期化用 RNG とエンジン RNG の分離）．解析モデル（BNM / Tipping）は連続力学のため socsim には載せず独立実装のまま．
+- 注: socsim エンジン化（および RNG ストリーム分離）により乱数の消費系列が旧バイナリと変わるため，ビット単位の軌跡再現は保証されない（同一シードでの再現性＝決定論は保証され，論文の定性的再現も保たれる）．
 
 ---
 
