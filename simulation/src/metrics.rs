@@ -1,5 +1,7 @@
-use crate::grid::{Cell, Grid};
 use serde::Serialize;
+
+use crate::grid::Cell;
+use crate::world::SchellingWorld;
 
 /// 1ステップ分の分離度指標
 #[derive(Debug, Clone, Serialize)]
@@ -22,8 +24,8 @@ pub struct Metrics {
 }
 
 impl Metrics {
-    /// グリッドの現在状態からメトリクスを計算する
-    pub fn compute(grid: &Grid, step: usize, n_dissatisfied: usize, n_moved: usize) -> Self {
+    /// 世界状態の現在のグリッドからメトリクスを計算する．
+    pub fn compute(world: &SchellingWorld, step: usize, n_dissatisfied: usize, n_moved: usize) -> Self {
         let mut sum_a = 0.0;
         let mut sum_b = 0.0;
         let mut count_a = 0usize;
@@ -31,14 +33,14 @@ impl Metrics {
         let mut no_opp = 0usize;
         let mut total_agents = 0usize;
 
-        for r in 0..grid.rows {
-            for c in 0..grid.cols {
-                let cell = grid.cells[r][c];
+        for r in 0..world.rows() {
+            for c in 0..world.cols() {
+                let cell = world.cell_color(r, c);
                 if cell == Cell::Empty {
                     continue;
                 }
                 total_agents += 1;
-                let ratio = grid.same_color_ratio(r, c);
+                let ratio = world.same_color_ratio(r, c);
 
                 match cell {
                     Cell::GroupA => { sum_a += ratio; count_a += 1; }
@@ -47,10 +49,7 @@ impl Metrics {
                 }
 
                 // 異色近隣がいないか確認
-                let has_opposite = grid.moore_neighbors(r, c).iter().any(|&(nr, nc)| {
-                    grid.cells[nr][nc] != Cell::Empty && grid.cells[nr][nc] != cell
-                });
-                if !has_opposite {
+                if !world.has_opposite_neighbor(r, c) {
                     no_opp += 1;
                 }
             }

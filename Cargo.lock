@@ -360,9 +360,11 @@ dependencies = [
  "clap",
  "csv",
  "rand",
- "rand_chacha",
  "serde",
  "serde_json",
+ "socsim-core",
+ "socsim-engine",
+ "socsim-grid",
 ]
 
 [[package]]
@@ -415,6 +417,53 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 
 [[package]]
+name = "socsim-core"
+version = "0.1.0"
+source = "git+https://github.com/akitenkrad/rs-social-simulation-tools?branch=main#ba7cc30b6b3ccb24a6bd9fd48c92d9a54ee0ba18"
+dependencies = [
+ "serde_json",
+ "socsim-rng",
+ "thiserror",
+]
+
+[[package]]
+name = "socsim-engine"
+version = "0.1.0"
+source = "git+https://github.com/akitenkrad/rs-social-simulation-tools?branch=main#ba7cc30b6b3ccb24a6bd9fd48c92d9a54ee0ba18"
+dependencies = [
+ "rand",
+ "serde_json",
+ "socsim-core",
+ "socsim-log",
+]
+
+[[package]]
+name = "socsim-grid"
+version = "0.1.0"
+source = "git+https://github.com/akitenkrad/rs-social-simulation-tools?branch=main#ba7cc30b6b3ccb24a6bd9fd48c92d9a54ee0ba18"
+dependencies = [
+ "socsim-core",
+]
+
+[[package]]
+name = "socsim-log"
+version = "0.1.0"
+source = "git+https://github.com/akitenkrad/rs-social-simulation-tools?branch=main#ba7cc30b6b3ccb24a6bd9fd48c92d9a54ee0ba18"
+dependencies = [
+ "serde_json",
+ "socsim-core",
+]
+
+[[package]]
+name = "socsim-rng"
+version = "0.1.0"
+source = "git+https://github.com/akitenkrad/rs-social-simulation-tools?branch=main#ba7cc30b6b3ccb24a6bd9fd48c92d9a54ee0ba18"
+dependencies = [
+ "rand",
+ "rand_chacha",
+]
+
+[[package]]
 name = "strsim"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -429,6 +478,26 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
+]
+
+[[package]]
+name = "thiserror"
+version = "1.0.69"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b6aaf5339b578ea85b50e080feb250a3e8ae8cfcdff9a461c9ec2904bc923f52"
+dependencies = [
+ "thiserror-impl",
+]
+
+[[package]]
+name = "thiserror-impl"
+version = "1.0.69"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4fee6c4efc90059e10f81e6d42c60a18f76588c3d74cb83a0b242a2b6c7504c1"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

@@ -1,8 +1,10 @@
 mod analytic;
 mod config;
 mod grid;
+mod mechanisms;
 mod metrics;
 mod simulation;
+mod world;
 
 use std::fs::{self, File};
 use std::io::BufWriter;
