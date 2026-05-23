@@ -44,6 +44,11 @@ impl Mechanism<SchellingWorld> for SchellingMoveMechanism {
     }
 
     fn apply(&mut self, _phase: Phase, ctx: &mut StepContext<'_, SchellingWorld>) -> Result<()> {
+        // 近隣走査用の再利用バッファ(満足判定のホットパスからヒープ確保を排除する)．
+        // `neighbors_into` は `neighbors` と同一順序の近隣を埋めるため，満足判定・
+        // 移動先選択(ひいては結果)はいずれも不変．
+        let mut buf: Vec<(usize, usize)> = Vec::new();
+
         // ステップ開始時に不満足なエージェント集合をスナップショットする．
         // 当該ステップで移動できるのはこの集合のメンバーのみ．
         let dissatisfied: HashSet<AgentId> = ctx
@@ -53,7 +58,7 @@ impl Mechanism<SchellingWorld> for SchellingMoveMechanism {
             .copied()
             .filter(|id| {
                 let (r, c) = ctx.world.index.position(*id).unwrap();
-                !ctx.world.is_satisfied(r, c)
+                !ctx.world.is_satisfied_buf(r, c, &mut buf)
             })
             .collect();
 
@@ -72,7 +77,7 @@ impl Mechanism<SchellingWorld> for SchellingMoveMechanism {
             };
 
             // 他者の移動で既に満足していればスキップ．
-            if ctx.world.is_satisfied(r, c) {
+            if ctx.world.is_satisfied_buf(r, c, &mut buf) {
                 continue;
             }
 

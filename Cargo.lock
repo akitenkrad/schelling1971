@@ -329,6 +329,7 @@ checksum = "e6c10a63a0fa32252be49d21e7709d4d4baf8d231c2dbce1eaa8141b9b127d88"
 dependencies = [
  "ppv-lite86",
  "rand_core",
+ "serde",
 ]
 
 [[package]]
@@ -419,8 +420,9 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 [[package]]
 name = "socsim-core"
 version = "0.1.0"
-source = "git+https://github.com/akitenkrad/rs-social-simulation-tools?branch=main#ba7cc30b6b3ccb24a6bd9fd48c92d9a54ee0ba18"
+source = "git+https://github.com/akitenkrad/rs-social-simulation-tools?branch=main#59f7baa26d68bc8abee3f1ef86dd2b6d77578617"
 dependencies = [
+ "serde",
  "serde_json",
  "socsim-rng",
  "thiserror",
@@ -429,38 +431,30 @@ dependencies = [
 [[package]]
 name = "socsim-engine"
 version = "0.1.0"
-source = "git+https://github.com/akitenkrad/rs-social-simulation-tools?branch=main#ba7cc30b6b3ccb24a6bd9fd48c92d9a54ee0ba18"
+source = "git+https://github.com/akitenkrad/rs-social-simulation-tools?branch=main#59f7baa26d68bc8abee3f1ef86dd2b6d77578617"
 dependencies = [
  "rand",
+ "serde",
  "serde_json",
  "socsim-core",
- "socsim-log",
 ]
 
 [[package]]
 name = "socsim-grid"
 version = "0.1.0"
-source = "git+https://github.com/akitenkrad/rs-social-simulation-tools?branch=main#ba7cc30b6b3ccb24a6bd9fd48c92d9a54ee0ba18"
+source = "git+https://github.com/akitenkrad/rs-social-simulation-tools?branch=main#59f7baa26d68bc8abee3f1ef86dd2b6d77578617"
 dependencies = [
- "socsim-core",
-]
-
-[[package]]
-name = "socsim-log"
-version = "0.1.0"
-source = "git+https://github.com/akitenkrad/rs-social-simulation-tools?branch=main#ba7cc30b6b3ccb24a6bd9fd48c92d9a54ee0ba18"
-dependencies = [
- "serde_json",
  "socsim-core",
 ]
 
 [[package]]
 name = "socsim-rng"
 version = "0.1.0"
-source = "git+https://github.com/akitenkrad/rs-social-simulation-tools?branch=main#ba7cc30b6b3ccb24a6bd9fd48c92d9a54ee0ba18"
+source = "git+https://github.com/akitenkrad/rs-social-simulation-tools?branch=main#59f7baa26d68bc8abee3f1ef86dd2b6d77578617"
 dependencies = [
  "rand",
  "rand_chacha",
+ "serde",
 ]
 
 [[package]]

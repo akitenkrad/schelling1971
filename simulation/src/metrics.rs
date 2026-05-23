@@ -33,6 +33,10 @@ impl Metrics {
         let mut no_opp = 0usize;
         let mut total_agents = 0usize;
 
+        // 全占有セルを走査する間，近隣バッファを 1 本だけ再利用してヒープ確保を排除する．
+        // `neighbors_into` は `neighbors` と同一順序の近隣を埋めるため，比率・異色判定は不変．
+        let mut buf: Vec<(usize, usize)> = Vec::new();
+
         for r in 0..world.rows() {
             for c in 0..world.cols() {
                 let cell = world.cell_color(r, c);
@@ -40,7 +44,7 @@ impl Metrics {
                     continue;
                 }
                 total_agents += 1;
-                let ratio = world.same_color_ratio(r, c);
+                let ratio = world.same_color_ratio_buf(r, c, &mut buf);
 
                 match cell {
                     Cell::GroupA => { sum_a += ratio; count_a += 1; }
@@ -49,7 +53,7 @@ impl Metrics {
                 }
 
                 // 異色近隣がいないか確認
-                if !world.has_opposite_neighbor(r, c) {
+                if !world.has_opposite_neighbor_buf(r, c, &mut buf) {
                     no_opp += 1;
                 }
             }

@@ -116,26 +116,36 @@ pub fn run(cfg: &Config) -> SimulationResult {
         save_snapshot(sim.world(), 0, &snapshots_dir);
     }
 
-    for iteration in 1..=cfg.max_iterations {
-        // 1ステップ実行(メカニズムが scratch に結果を書き，必要なら停止要求)．
-        sim.step().expect("シミュレーションステップの実行に失敗");
+    // socsim エンジンの観測付き実行ループ．`run_observed` は
+    // `while !clock.is_done() && !stop_requested { step(); observe(report); if stop break }`
+    // を回し，停止要求を出したステップを含めて観測を 1 回ずつ呼ぶ．これは旧来の
+    // 手書きループ(step → scratch 読み → stop_requested で break)と同一のステップ数・
+    // RNG 使用・観測タイミングを持つ．
+    //
+    // 収束フラグと最終反復は停止ステップ(または最終ステップ)の値で確定させたいので，
+    // クロージャ外の可変変数に毎ステップ上書きしていく(`report.t` は step 後のクロック
+    // = 1始まりの反復番号で，旧ループの `iteration` と一致)．
+    let mut converged = false;
+    let mut final_iteration = cfg.max_iterations;
+    sim.run_observed(|report| {
+        let iteration = report.t as usize;
 
-        let n_dissatisfied = *sim
-            .scratch()
+        let n_dissatisfied = *report
+            .scratch
             .get::<usize>("n_dissatisfied")
             .expect("n_dissatisfied が scratch に存在しません");
-        let n_moved = *sim
-            .scratch()
+        let n_moved = *report
+            .scratch
             .get::<usize>("n_moved")
             .expect("n_moved が scratch に存在しません");
-        let converged = *sim
-            .scratch()
+        let step_converged = *report
+            .scratch
             .get::<bool>("converged")
             .expect("converged が scratch に存在しません");
 
         // メトリクスを記録
         metrics_history.push(Metrics::compute(
-            sim.world(),
+            report.world,
             iteration,
             n_dissatisfied,
             n_moved,
@@ -143,23 +153,19 @@ pub fn run(cfg: &Config) -> SimulationResult {
 
         // スナップショットを保存
         if cfg.snapshot_interval > 0 && iteration % cfg.snapshot_interval == 0 {
-            save_snapshot(sim.world(), iteration, &snapshots_dir);
+            save_snapshot(report.world, iteration, &snapshots_dir);
         }
 
-        // メカニズムが停止を要求していれば終了．
-        if sim.stop_requested() {
-            return SimulationResult {
-                metrics_history,
-                converged,
-                final_iteration: iteration,
-            };
-        }
-    }
+        // 各ステップの収束フラグ・反復番号を保持(停止/最終ステップの値が最終的に残る)．
+        converged = step_converged;
+        final_iteration = iteration;
+    })
+    .expect("シミュレーションの実行に失敗");
 
     SimulationResult {
         metrics_history,
-        converged: false,
-        final_iteration: cfg.max_iterations,
+        converged,
+        final_iteration,
     }
 }
 
