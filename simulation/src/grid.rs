@@ -20,7 +20,7 @@ impl Cell {
     /// CSV出力用の整数値に変換する (0=空, 1=A, 2=B)
     pub fn to_int(self) -> u8 {
         match self {
-            Cell::Empty  => 0,
+            Cell::Empty => 0,
             Cell::GroupA => 1,
             Cell::GroupB => 2,
         }

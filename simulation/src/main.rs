@@ -12,7 +12,7 @@ use std::path::Path;
 
 use chrono::Local;
 use clap::{Parser, Subcommand};
-use config::{Config, SatisfactionRule};
+use config::{Config, MoveMode, MoveStrategy, SatisfactionRule};
 use csv::Writer;
 use simulation::{run, save_metrics};
 
@@ -83,6 +83,17 @@ struct RunArgs {
     #[arg(long)]
     rule: Option<String>,
 
+    /// 移動運用モード: "standard" (緩運用，不満足者のみ移動) / "strict" (厳格運用 Fig.8，
+    /// 満足者も同色比率を厳密に改善できる空きセルへ投機的に移動する)．
+    #[arg(long, default_value = "standard")]
+    move_mode: String,
+
+    /// 移動先選択戦略: "nearest" (最近傍で最初に満足できる空きセル，既存挙動) /
+    /// "best-local" (最近傍距離帯の中で移動後同色比率が最大のセル；不等数 Fig.12 の
+    /// 少数派クラスタ比率を改善する)．
+    #[arg(long, default_value = "nearest")]
+    move_strategy: String,
+
     /// 最大反復回数
     #[arg(long, default_value_t = 500)]
     max_iterations: usize,
@@ -141,7 +152,8 @@ struct SweepArgs {
 
 #[derive(Parser, Debug)]
 struct BnmArgs {
-    /// プリセット名 (fig18 / fig19 / fig22 / fig23)．省略時は --w-tolerance 等を要求．
+    /// プリセット名 (fig18 / fig19 / fig20 / fig21 / fig22 / fig23 / fig24 / fig25 /
+    /// fig26 / fig27 / fig28 / fig29)．省略時は --w-tolerance 等を要求．
     #[arg(long)]
     preset: Option<String>,
 
@@ -315,7 +327,10 @@ fn parse_flow_string(s: &str) -> FlowModel {
             }
         }
         "discrete" => FlowModel::DiscreteBatch,
-        _ => panic!("未対応の flow 種別: \"{}\" (continuous / discrete)", parts[0]),
+        _ => panic!(
+            "未対応の flow 種別: \"{}\" (continuous / discrete)",
+            parts[0]
+        ),
     }
 }
 
@@ -387,8 +402,13 @@ fn build_bnm_inputs(
 // ---------------------------------------------------------------------------
 
 fn cmd_bnm_dispatch(args: BnmArgs) {
-    let (preset_name, phase, init) =
-        build_bnm_inputs(args.preset, args.w_tolerance, args.b_tolerance, args.capacity, args.init);
+    let (preset_name, phase, init) = build_bnm_inputs(
+        args.preset,
+        args.w_tolerance,
+        args.b_tolerance,
+        args.capacity,
+        args.init,
+    );
     let dynamics = DynamicsConfig {
         flow: parse_flow_string(&args.flow),
         max_steps: args.max_steps,
@@ -435,7 +455,10 @@ fn parse_speculation_string(s: &str) -> Speculation {
             }
             Speculation::Trend { window, weight }
         }
-        _ => panic!("未対応の投機モデル: \"{}\" (none / linear / trend)", parts[0]),
+        _ => panic!(
+            "未対応の投機モデル: \"{}\" (none / linear / trend)",
+            parts[0]
+        ),
     }
 }
 
@@ -552,7 +575,10 @@ fn parse_range(s: &str) -> Vec<f64> {
                 .map(|i| ((start + step * i as f64) * factor).round() / factor)
                 .collect()
         }
-        _ => panic!("レンジ文字列の形式が不正です: \"{}\" (\"start:stop:step\" または単一値)", s),
+        _ => panic!(
+            "レンジ文字列の形式が不正です: \"{}\" (\"start:stop:step\" または単一値)",
+            s
+        ),
     }
 }
 
@@ -636,6 +662,8 @@ struct RunConfigJson {
     command: &'static str,
     rule: String,
     rule_kind: &'static str,
+    move_mode: &'static str,
+    move_strategy: &'static str,
     threshold: Option<f64>,
     min_same: Option<usize>,
     max_same: Option<usize>,
@@ -665,6 +693,8 @@ fn run_config_json(cfg: &Config, vacant_rate: f64) -> RunConfigJson {
         command: "run",
         rule: cfg.rule.label(),
         rule_kind,
+        move_mode: cfg.move_mode.label(),
+        move_strategy: cfg.move_strategy.label(),
         threshold,
         min_same,
         max_same,
@@ -716,8 +746,24 @@ fn cmd_run(args: RunArgs) {
 
     let rule = match &args.rule {
         Some(s) => parse_rule_string(s),
-        None => SatisfactionRule::Ratio { threshold: args.threshold },
+        None => SatisfactionRule::Ratio {
+            threshold: args.threshold,
+        },
     };
+
+    let move_mode = MoveMode::parse(&args.move_mode).unwrap_or_else(|| {
+        panic!(
+            "未対応の move-mode: \"{}\" (standard / strict)",
+            args.move_mode
+        )
+    });
+
+    let move_strategy = MoveStrategy::parse(&args.move_strategy).unwrap_or_else(|| {
+        panic!(
+            "未対応の move-strategy: \"{}\" (nearest / best-local)",
+            args.move_strategy
+        )
+    });
 
     let cfg = Config {
         rows: args.rows,
@@ -725,6 +771,8 @@ fn cmd_run(args: RunArgs) {
         n_a,
         n_b,
         rule,
+        move_mode,
+        move_strategy,
         max_iterations: args.max_iterations,
         seed: args.seed,
         snapshot_interval: args.snapshot_interval,
@@ -733,13 +781,15 @@ fn cmd_run(args: RunArgs) {
 
     println!("=== Schelling 分離モデル 再現実験 ===");
     println!(
-        "グリッド: {}×{} | A: {} | B: {} | 空き: {} | ルール: {}",
+        "グリッド: {}×{} | A: {} | B: {} | 空き: {} | ルール: {} | 運用: {} | 戦略: {}",
         cfg.rows,
         cfg.cols,
         cfg.n_a,
         cfg.n_b,
         total - cfg.n_a - cfg.n_b,
         cfg.rule.label(),
+        cfg.move_mode.label(),
+        cfg.move_strategy.label(),
     );
     println!("シード: {:?}", cfg.seed);
     println!("出力先: {}", cfg.output_dir);
@@ -752,8 +802,11 @@ fn cmd_run(args: RunArgs) {
     {
         let path = format!("{}/config.json", cfg.output_dir);
         let file = File::create(&path).expect("config.json の作成に失敗");
-        serde_json::to_writer_pretty(BufWriter::new(file), &run_config_json(&cfg, args.vacant_rate))
-            .expect("config.json の書き込みに失敗");
+        serde_json::to_writer_pretty(
+            BufWriter::new(file),
+            &run_config_json(&cfg, args.vacant_rate),
+        )
+        .expect("config.json の書き込みに失敗");
     }
 
     // latest シンボリックリンクを作成・更新
@@ -854,7 +907,11 @@ fn cmd_sweep(args: SweepArgs) {
             cols: args.cols,
             n_a,
             n_b,
-            rule: SatisfactionRule::Ratio { threshold: combo.threshold },
+            rule: SatisfactionRule::Ratio {
+                threshold: combo.threshold,
+            },
+            move_mode: MoveMode::Standard,
+            move_strategy: MoveStrategy::Nearest,
             max_iterations: args.max_iterations,
             seed: Some(combo.seed),
             snapshot_interval: args.snapshot_interval,

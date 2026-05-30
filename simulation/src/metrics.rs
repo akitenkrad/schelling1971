@@ -25,7 +25,12 @@ pub struct Metrics {
 
 impl Metrics {
     /// 世界状態の現在のグリッドからメトリクスを計算する．
-    pub fn compute(world: &SchellingWorld, step: usize, n_dissatisfied: usize, n_moved: usize) -> Self {
+    pub fn compute(
+        world: &SchellingWorld,
+        step: usize,
+        n_dissatisfied: usize,
+        n_moved: usize,
+    ) -> Self {
         let mut sum_a = 0.0;
         let mut sum_b = 0.0;
         let mut count_a = 0usize;
@@ -47,9 +52,15 @@ impl Metrics {
                 let ratio = world.same_color_ratio_buf(r, c, &mut buf);
 
                 match cell {
-                    Cell::GroupA => { sum_a += ratio; count_a += 1; }
-                    Cell::GroupB => { sum_b += ratio; count_b += 1; }
-                    Cell::Empty  => {}
+                    Cell::GroupA => {
+                        sum_a += ratio;
+                        count_a += 1;
+                    }
+                    Cell::GroupB => {
+                        sum_b += ratio;
+                        count_b += 1;
+                    }
+                    Cell::Empty => {}
                 }
 
                 // 異色近隣がいないか確認
@@ -59,8 +70,16 @@ impl Metrics {
             }
         }
 
-        let avg_a = if count_a > 0 { sum_a / count_a as f64 } else { 0.0 };
-        let avg_b = if count_b > 0 { sum_b / count_b as f64 } else { 0.0 };
+        let avg_a = if count_a > 0 {
+            sum_a / count_a as f64
+        } else {
+            0.0
+        };
+        let avg_b = if count_b > 0 {
+            sum_b / count_b as f64
+        } else {
+            0.0
+        };
         let avg_all = if total_agents > 0 {
             (sum_a + sum_b) / total_agents as f64
         } else {
@@ -76,8 +95,7 @@ impl Metrics {
         // D = 0.5 * |a/A - b/B|  (完全分離=0, 完全混合=1 に近づく)
         // ここでは補完: 分離が強いほど D が大きくなるよう符号を調整
         let dissimilarity = if count_a > 0 && count_b > 0 {
-            0.5 * ((count_a as f64 / total_agents as f64)
-                 - (count_b as f64 / total_agents as f64))
+            0.5 * ((count_a as f64 / total_agents as f64) - (count_b as f64 / total_agents as f64))
                 .abs()
         } else {
             0.5

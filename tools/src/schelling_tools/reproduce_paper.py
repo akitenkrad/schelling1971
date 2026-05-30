@@ -50,6 +50,10 @@ class Experiment:
     # 例: "ratio:0.333" / "min-same:3" / "bounded:3:6"
     rule: str | None = None
     threshold: float = 1.0 / 3.0
+    # 移動運用モード: "standard" (緩運用) / "strict" (厳格運用 Fig.8)
+    move_mode: str = "standard"
+    # 移動先選択戦略: "nearest" (既存) / "best-local" (Fig.12 クラスタ改善)
+    move_strategy: str = "nearest"
     # エージェント数（0なら vacant_rate から自動計算で等数）
     n_a: int = 0
     n_b: int = 0
@@ -73,6 +77,7 @@ class Experiment:
             args += ["--rule", self.rule]
         else:
             args += ["--threshold", f"{self.threshold:.6f}"]
+        args += ["--move-mode", self.move_mode, "--move-strategy", self.move_strategy]
         if self.n_a > 0 and self.n_b > 0:
             args += ["--n-a", str(self.n_a), "--n-b", str(self.n_b)]
         return args
@@ -106,16 +111,18 @@ def paper_experiments() -> list[Experiment]:
         Experiment(
             key="fig08_tau_one_half_strict",
             figure="Fig. 8",
-            description="τ=1/2, 等数 (厳格運用の近似 — シード分散で上限を探索)",
+            description="τ=1/2, 等数 (厳格運用 — 満足者も投機的に移動する)",
             threshold=0.5,
+            move_mode="strict",
             paper_avg_same_ratio=(0.89, 0.91),
             paper_pct_no_opposite=(65.0, 70.0),
         ),
         Experiment(
             key="fig12_unequal_two_to_one",
             figure="Fig. 12",
-            description="τ=1/3, 不等数 2:1 (A:97, B:49)",
+            description="τ=1/3, 不等数 2:1 (A:97, B:49), best-local 戦略で少数派クラスタを改善",
             threshold=1.0 / 3.0,
+            move_strategy="best-local",
             n_a=97,
             n_b=49,
             paper_avg_same_ratio=(0.70, 0.85),
@@ -198,6 +205,22 @@ def analytic_experiments() -> list[AnalyticExperiment]:
             expected_converged_kind="mixed",
         ),
         AnalyticExperiment(
+            key="fig20_lenient_linear",
+            figure="Fig. 20",
+            description="緩勾配の直線型 (R_max=3, 対称) — 寛容化で反応曲線の頂点が上がる．",
+            model="bnm",
+            preset="fig20",
+            init=(50.0, 50.0),
+        ),
+        AnalyticExperiment(
+            key="fig21_steep_linear",
+            figure="Fig. 21",
+            description="急勾配の直線型 (R_max=1, 対称) — 不寛容化で頂点が下がる．",
+            model="bnm",
+            preset="fig21",
+            init=(50.0, 50.0),
+        ),
+        AnalyticExperiment(
             key="fig22_unequal_no_intersection",
             figure="Fig. 22",
             description="不等数 — 反応曲線非交差で混合均衡なし．",
@@ -212,6 +235,54 @@ def analytic_experiments() -> list[AnalyticExperiment]:
             model="bnm",
             preset="fig23",
             init=(50.0, 15.0),
+        ),
+        AnalyticExperiment(
+            key="fig24_asymmetric_tolerance",
+            figure="Fig. 24",
+            description="非対称許容 (W:R_max=2, B:R_max=1) — 混合均衡が偏在する．",
+            model="bnm",
+            preset="fig24",
+            init=(50.0, 50.0),
+        ),
+        AnalyticExperiment(
+            key="fig25_zero_tolerance_intercept",
+            figure="Fig. 25",
+            description="ゼロ許容者あり (intercept=10) — 端点流出が強まる．",
+            model="bnm",
+            preset="fig25",
+            init=(60.0, 60.0),
+        ),
+        AnalyticExperiment(
+            key="fig26_capacity_constraint",
+            figure="Fig. 26",
+            description="容量制約 C=120 — 入域競合で混合均衡が容量線上に乗る．",
+            model="bnm",
+            preset="fig26",
+            init=(60.0, 50.0),
+        ),
+        AnalyticExperiment(
+            key="fig27_piecewise_schedule",
+            figure="Fig. 27",
+            description="区分線形スケジュール (S字CDF) — 非一様な許容分布．",
+            model="bnm",
+            preset="fig27",
+            init=(55.0, 55.0),
+        ),
+        AnalyticExperiment(
+            key="fig28_unequal_tolerant_minority",
+            figure="Fig. 28",
+            description="不等数 + 少数派が寛容 (R_max=4) — 混合が生き残る．",
+            model="bnm",
+            preset="fig28",
+            init=(60.0, 25.0),
+        ),
+        AnalyticExperiment(
+            key="fig29_strong_quota",
+            figure="Fig. 29",
+            description="強いクオータ (B pop_max=20) — 混合均衡が低 B 域に固定される．",
+            model="bnm",
+            preset="fig29",
+            init=(60.0, 10.0),
         ),
         AnalyticExperiment(
             key="fig30a_in_tipping_only",

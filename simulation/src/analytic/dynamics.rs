@@ -29,7 +29,11 @@ pub enum FlowModel {
 
 impl Default for FlowModel {
     fn default() -> Self {
-        FlowModel::Continuous { k_w: 1.0, k_b: 1.0, dt: 0.1 }
+        FlowModel::Continuous {
+            k_w: 1.0,
+            k_b: 1.0,
+            dt: 0.1,
+        }
     }
 }
 
@@ -290,8 +294,14 @@ mod tests {
 
     fn fig18_phase() -> PhaseConfig {
         PhaseConfig {
-            w_schedule: ToleranceSchedule::Linear { r_max: 2.0, pop_max: 100.0 },
-            b_schedule: ToleranceSchedule::Linear { r_max: 2.0, pop_max: 50.0 },
+            w_schedule: ToleranceSchedule::Linear {
+                r_max: 2.0,
+                pop_max: 100.0,
+            },
+            b_schedule: ToleranceSchedule::Linear {
+                r_max: 2.0,
+                pop_max: 50.0,
+            },
             capacity: None,
         }
     }
@@ -347,8 +357,14 @@ mod tests {
     #[test]
     fn capacity_constraint_respected() {
         let phase = PhaseConfig {
-            w_schedule: ToleranceSchedule::Linear { r_max: 2.0, pop_max: 100.0 },
-            b_schedule: ToleranceSchedule::Linear { r_max: 2.0, pop_max: 100.0 },
+            w_schedule: ToleranceSchedule::Linear {
+                r_max: 2.0,
+                pop_max: 100.0,
+            },
+            b_schedule: ToleranceSchedule::Linear {
+                r_max: 2.0,
+                pop_max: 100.0,
+            },
             capacity: Some(120.0),
         };
         let cfg = DynamicsConfig::default();
@@ -366,8 +382,12 @@ mod tests {
         let basin = basin_of_attraction(&phase, &cfg, 4, 4);
         assert!(!basin.is_empty());
         // 少なくとも1点が AllWhite に，1点が AllBlack に収束する
-        let has_white = basin.iter().any(|s| s.converged_kind == Some(EquilibriumKind::AllWhite));
-        let has_black = basin.iter().any(|s| s.converged_kind == Some(EquilibriumKind::AllBlack));
+        let has_white = basin
+            .iter()
+            .any(|s| s.converged_kind == Some(EquilibriumKind::AllWhite));
+        let has_black = basin
+            .iter()
+            .any(|s| s.converged_kind == Some(EquilibriumKind::AllBlack));
         assert!(has_white && has_black, "両端点への吸引域が観測されること");
     }
 }

@@ -18,10 +18,11 @@ use super::reaction::ReactionCurve;
 // ---------------------------------------------------------------------------
 
 /// 期待形成モデル．
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Speculation {
     /// 投機なし．許容判定は現在比率のみ．
+    #[default]
     None,
     /// 線形外挿: 期待 $B_t^e = B_t + \alpha \cdot \dot B_{t-1}$．
     /// 許容判定で $B_t$ の代わりに $B_t^e$ を使い，将来悪化を予測した早期退出を許す．
@@ -29,12 +30,6 @@ pub enum Speculation {
     /// 過去 window ステップから線形回帰で外挿．weight は 0..=1 で，
     /// $B_t^e = B_t + \text{weight} \cdot \text{trend}$．
     Trend { window: usize, weight: f64 },
-}
-
-impl Default for Speculation {
-    fn default() -> Self {
-        Speculation::None
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -378,8 +373,14 @@ mod tests {
 
     fn fig18_phase() -> PhaseConfig {
         PhaseConfig {
-            w_schedule: ToleranceSchedule::Linear { r_max: 2.0, pop_max: 100.0 },
-            b_schedule: ToleranceSchedule::Linear { r_max: 2.0, pop_max: 50.0 },
+            w_schedule: ToleranceSchedule::Linear {
+                r_max: 2.0,
+                pop_max: 100.0,
+            },
+            b_schedule: ToleranceSchedule::Linear {
+                r_max: 2.0,
+                pop_max: 50.0,
+            },
             capacity: None,
         }
     }

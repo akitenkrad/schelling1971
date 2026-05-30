@@ -41,6 +41,7 @@ impl<'a> ReactionCurve<'a> {
     }
 
     /// 数値微分 $\frac{d B_W}{d W}$．安定性判定 (反応曲線が容量制約を横切る方向) で利用する．
+    #[allow(dead_code)]
     pub fn derivative(&self, own: f64) -> f64 {
         let h = (self.schedule.pop_max() * 1e-6).max(1e-9);
         let lo = (own - h).max(0.0);

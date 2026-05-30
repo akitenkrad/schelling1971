@@ -40,6 +40,77 @@ impl SatisfactionRule {
     }
 }
 
+/// 移動運用モード．Schelling (1971) p.155 が区別する 2 つの運用形式に対応する．
+///
+/// - `Standard` : 緩運用．不満足エージェントのみが移動する (Fig.9–14 のデフォルト)．
+/// - `Strict`   : 厳格運用 (Fig.8)．不満足エージェントに加えて，満足している
+///   エージェントも「同色比率を厳密に改善できる空きセル」へ投機的に移動する．
+///   満足者が常により同質な近隣を探すため，分離度が緩運用より高くなる．
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MoveMode {
+    /// 緩運用: 不満足者のみ移動 (既存挙動)．
+    #[default]
+    Standard,
+    /// 厳格運用 (Fig.8): 満足者も同色比率を厳密に改善できれば移動する．
+    Strict,
+}
+
+impl MoveMode {
+    /// CLI 文字列からパースする．
+    pub fn parse(s: &str) -> Option<MoveMode> {
+        match s {
+            "standard" => Some(MoveMode::Standard),
+            "strict" => Some(MoveMode::Strict),
+            _ => None,
+        }
+    }
+
+    /// CLI/ログ出力用のラベル．
+    pub fn label(self) -> &'static str {
+        match self {
+            MoveMode::Standard => "standard",
+            MoveMode::Strict => "strict",
+        }
+    }
+}
+
+/// 移動先選択戦略．不満足エージェントが「どの満足できる空きセルへ動くか」を決める．
+///
+/// - `Nearest`   : 最近傍 (チェビシェフ距離) で最初に見つかった満足できる空きセルへ
+///   動く (既存挙動)．Schelling の格子図 Fig.7–14 のデフォルト．
+/// - `BestLocal` : 満足できる全空きセルのうち，移動後の同色比率が最大のセルへ動く．
+///   少数派が「最も同質な区画」へ寄り集まるため，不等数 (Fig.12) の少数派クラスタ
+///   比率が論文値 (>80%) に近づく．同比率の候補は距離昇順→行優先順で先勝ち
+///   (より近く・より上左のセルを選ぶ；決定論)．探索する空きセル集合は Nearest と
+///   同一で，選択基準だけが異なる．
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MoveStrategy {
+    /// 最近傍で最初に満足できる空きセル (既存挙動)．
+    #[default]
+    Nearest,
+    /// 最近傍距離帯の中で移動後同色比率が最大のセル (Fig.12 クラスタ改善)．
+    BestLocal,
+}
+
+impl MoveStrategy {
+    /// CLI 文字列からパースする．
+    pub fn parse(s: &str) -> Option<MoveStrategy> {
+        match s {
+            "nearest" => Some(MoveStrategy::Nearest),
+            "best-local" => Some(MoveStrategy::BestLocal),
+            _ => None,
+        }
+    }
+
+    /// CLI/ログ出力用のラベル．
+    pub fn label(self) -> &'static str {
+        match self {
+            MoveStrategy::Nearest => "nearest",
+            MoveStrategy::BestLocal => "best-local",
+        }
+    }
+}
+
 /// シミュレーション設定
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -53,6 +124,10 @@ pub struct Config {
     pub n_b: usize,
     /// 満足判定ルール
     pub rule: SatisfactionRule,
+    /// 移動運用モード (緩運用 = Standard / 厳格運用 = Strict, Fig.8)
+    pub move_mode: MoveMode,
+    /// 移動先選択戦略 (Nearest = 既存 / BestLocal = Fig.12 クラスタ改善)
+    pub move_strategy: MoveStrategy,
     /// 最大反復回数
     pub max_iterations: usize,
     /// 乱数シード (None の場合はランダム)
@@ -80,7 +155,11 @@ impl Default for Config {
             cols,
             n_a,
             n_b,
-            rule: SatisfactionRule::Ratio { threshold: 1.0 / 3.0 },
+            rule: SatisfactionRule::Ratio {
+                threshold: 1.0 / 3.0,
+            },
+            move_mode: MoveMode::Standard,
+            move_strategy: MoveStrategy::Nearest,
             max_iterations: 500,
             seed: Some(42),
             snapshot_interval: 1,

@@ -50,12 +50,10 @@ pub fn init_world(cfg: &Config, rng: &mut SimRng) -> (GridIndex, BTreeMap<AgentI
 
     // セル配色をいったん 2次元配列に確定させる(旧実装と同じ手順)．
     let mut cells = vec![vec![Cell::Empty; cfg.cols]; cfg.rows];
-    for i in 0..cfg.n_a {
-        let (r, c) = positions[i];
+    for &(r, c) in positions.iter().take(cfg.n_a) {
         cells[r][c] = Cell::GroupA;
     }
-    for i in 0..cfg.n_b {
-        let (r, c) = positions[cfg.n_a + i];
+    for &(r, c) in positions.iter().skip(cfg.n_a).take(cfg.n_b) {
         cells[r][c] = Cell::GroupB;
     }
 
@@ -63,12 +61,12 @@ pub fn init_world(cfg: &Config, rng: &mut SimRng) -> (GridIndex, BTreeMap<AgentI
     let mut index = GridIndex::new(Grid::new(cfg.rows, cfg.cols, Boundary::Fixed));
     let mut colors: BTreeMap<AgentId, Cell> = BTreeMap::new();
     let mut next_id = 0u64;
-    for r in 0..cfg.rows {
-        for c in 0..cfg.cols {
-            if cells[r][c] != Cell::Empty {
+    for (r, row) in cells.iter().enumerate() {
+        for (c, &cell) in row.iter().enumerate() {
+            if cell != Cell::Empty {
                 let id = AgentId(next_id);
                 index.place(id, r, c).expect("初期配置に失敗");
-                colors.insert(id, cells[r][c]);
+                colors.insert(id, cell);
                 next_id += 1;
             }
         }
@@ -100,7 +98,14 @@ pub fn run(cfg: &Config) -> SimulationResult {
     let (index, colors) = init_world(cfg, &mut init_rng);
 
     // 世界状態とエンジンを構築(エンジン RNG も root から別ラベルで派生)．
-    let world = SchellingWorld::new(index, colors, cfg.rule, cfg.max_iterations as u64);
+    let world = SchellingWorld::with_modes(
+        index,
+        colors,
+        cfg.rule,
+        cfg.move_mode,
+        cfg.move_strategy,
+        cfg.max_iterations as u64,
+    );
     let mut sim = SimulationBuilder::new(world)
         .scheduler(Box::new(RandomActivationScheduler))
         .seed(derive_seed(root, &[RNG_ENGINE]))
@@ -152,7 +157,7 @@ pub fn run(cfg: &Config) -> SimulationResult {
         ));
 
         // スナップショットを保存
-        if cfg.snapshot_interval > 0 && iteration % cfg.snapshot_interval == 0 {
+        if cfg.snapshot_interval > 0 && iteration.is_multiple_of(cfg.snapshot_interval) {
             save_snapshot(report.world, iteration, &snapshots_dir);
         }
 
@@ -204,7 +209,7 @@ pub fn save_metrics(metrics: &[Metrics], output_dir: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::SatisfactionRule;
+    use crate::config::{MoveMode, MoveStrategy, SatisfactionRule};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     /// テスト用に一意な出力ディレクトリを払い出す．
@@ -230,10 +235,32 @@ mod tests {
             n_a: 73,
             n_b: 73,
             rule: SatisfactionRule::Ratio { threshold: 0.5 },
+            move_mode: MoveMode::Standard,
+            move_strategy: MoveStrategy::Nearest,
             max_iterations: 200,
             seed: Some(42),
             snapshot_interval: 0, // I/O を抑える
             output_dir,
+        }
+    }
+
+    fn strict_config(output_dir: String) -> Config {
+        Config {
+            move_mode: MoveMode::Strict,
+            ..test_config(output_dir)
+        }
+    }
+
+    /// 不等数 (2:1) で少数派 (B) のクラスタ比率を測るための設定．
+    fn unequal_config(output_dir: String, strategy: MoveStrategy) -> Config {
+        Config {
+            n_a: 97,
+            n_b: 49,
+            rule: SatisfactionRule::Ratio {
+                threshold: 1.0 / 3.0,
+            },
+            move_strategy: strategy,
+            ..test_config(output_dir)
         }
     }
 
@@ -252,7 +279,7 @@ mod tests {
         }
     }
 
-    /// 旧実装のセマンティクス: 各ステップの移動数は開始時不満足数以下．
+    /// 旧実装のセマンティクス (緩運用): 各ステップの移動数は開始時不満足数以下．
     #[test]
     fn moved_never_exceeds_dissatisfied() {
         let result = run(&test_config(temp_output_dir()));
@@ -265,5 +292,79 @@ mod tests {
                 m.n_dissatisfied
             );
         }
+    }
+
+    /// 厳格運用 (Fig.8) も同一シードで完全に再現する．
+    #[test]
+    fn strict_mode_is_deterministic() {
+        let a = run(&strict_config(temp_output_dir()));
+        let b = run(&strict_config(temp_output_dir()));
+        assert_eq!(a.converged, b.converged);
+        assert_eq!(a.final_iteration, b.final_iteration);
+        assert_eq!(a.metrics_history.len(), b.metrics_history.len());
+        for (ma, mb) in a.metrics_history.iter().zip(&b.metrics_history) {
+            assert_eq!(ma.n_moved, mb.n_moved);
+            assert!((ma.avg_same_ratio - mb.avg_same_ratio).abs() < 1e-12);
+        }
+    }
+
+    /// 厳格運用は満足者も投機的に移動するため，緩運用より分離度 (平均同色比率) が
+    /// 高くなる(論文 Fig.8 が Fig.9 より分離が進む現象に対応)．また停止後は誰も
+    /// 同色比率を改善できない安定状態にある．
+    #[test]
+    fn strict_mode_segregates_more_than_standard() {
+        let standard = run(&test_config(temp_output_dir()));
+        let strict = run(&strict_config(temp_output_dir()));
+        let std_final = standard.metrics_history.last().unwrap().avg_same_ratio;
+        let strict_final = strict.metrics_history.last().unwrap().avg_same_ratio;
+        assert!(
+            strict_final >= std_final,
+            "strict avg_same={} should be >= standard avg_same={}",
+            strict_final,
+            std_final
+        );
+    }
+
+    /// 厳格運用では投機移動により `n_moved > n_dissatisfied` のステップが生じうる
+    /// (満足者の移動が含まれるため)．緩運用の不等式とは別のセマンティクス．
+    #[test]
+    fn strict_mode_allows_speculative_moves() {
+        let result = run(&strict_config(temp_output_dir()));
+        let any_speculative = result
+            .metrics_history
+            .iter()
+            .any(|m| m.n_moved > m.n_dissatisfied);
+        assert!(
+            any_speculative,
+            "strict mode should exhibit at least one step with speculative moves"
+        );
+    }
+
+    /// BestLocal 戦略も同一シードで完全に再現する．
+    #[test]
+    fn best_local_is_deterministic() {
+        let a = run(&unequal_config(temp_output_dir(), MoveStrategy::BestLocal));
+        let b = run(&unequal_config(temp_output_dir(), MoveStrategy::BestLocal));
+        assert_eq!(a.final_iteration, b.final_iteration);
+        assert_eq!(a.metrics_history.len(), b.metrics_history.len());
+        for (ma, mb) in a.metrics_history.iter().zip(&b.metrics_history) {
+            assert!((ma.avg_same_ratio_b - mb.avg_same_ratio_b).abs() < 1e-12);
+        }
+    }
+
+    /// 不等数 (Fig.12) で BestLocal 戦略は少数派 (B) の同色比率を Nearest 戦略以上に
+    /// 高める(より同質な区画へ寄り集まるため)．
+    #[test]
+    fn best_local_improves_minority_clustering() {
+        let nearest = run(&unequal_config(temp_output_dir(), MoveStrategy::Nearest));
+        let best = run(&unequal_config(temp_output_dir(), MoveStrategy::BestLocal));
+        let near_b = nearest.metrics_history.last().unwrap().avg_same_ratio_b;
+        let best_b = best.metrics_history.last().unwrap().avg_same_ratio_b;
+        assert!(
+            best_b >= near_b,
+            "best-local minority B avg_same={} should be >= nearest={}",
+            best_b,
+            near_b
+        );
     }
 }

@@ -211,7 +211,11 @@ impl ToleranceSchedule {
                 intercept_pop, slope, pop_max
             ),
             ToleranceSchedule::PiecewiseLinear { points, pop_max } => {
-                format!("piecewise(n_points={}, pop_max={:.1})", points.len(), pop_max)
+                format!(
+                    "piecewise(n_points={}, pop_max={:.1})",
+                    points.len(),
+                    pop_max
+                )
             }
         }
     }

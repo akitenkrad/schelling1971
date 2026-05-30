@@ -14,8 +14,7 @@ use serde::{Deserialize, Serialize};
 use super::dynamics::{basin_of_attraction, integrate, BasinSample, DynamicsConfig};
 use super::phase::{Equilibrium, EquilibriumKind, PhaseConfig, Stability, ViabilityRegion};
 use super::tipping::{
-    classify_tipping, FlowAsymmetry, Speculation, TippingClassification, TippingConfig,
-    TippingType,
+    classify_tipping, FlowAsymmetry, Speculation, TippingClassification, TippingConfig, TippingType,
 };
 
 // ---------------------------------------------------------------------------
@@ -190,13 +189,19 @@ fn dump_phase_artifacts(phase: &PhaseConfig, output_dir: &str) -> Vec<Equilibriu
         .w_reaction()
         .sample(n_samples)
         .into_iter()
-        .map(|(o, m)| ReactionRow { own: o, max_other: m })
+        .map(|(o, m)| ReactionRow {
+            own: o,
+            max_other: m,
+        })
         .collect();
     let b_react_rows: Vec<ReactionRow> = phase
         .b_reaction()
         .sample(n_samples)
         .into_iter()
-        .map(|(o, m)| ReactionRow { own: o, max_other: m })
+        .map(|(o, m)| ReactionRow {
+            own: o,
+            max_other: m,
+        })
         .collect();
     write_csv(
         &format!("{}/reaction_curve_w.csv", output_dir),
@@ -323,7 +328,10 @@ pub fn cmd_bnm(args: BnmRunArgs) {
             equilibrium_kind_label(eq.kind)
         );
     }
-    println!("CSV → {}/{{tolerance,reaction_curve,equilibria,vector_field,trajectory}}.csv", output_dir);
+    println!(
+        "CSV → {}/{{tolerance,reaction_curve,equilibria,vector_field,trajectory}}.csv",
+        output_dir
+    );
     println!("設定 → {}/config.json", output_dir);
 }
 
@@ -425,7 +433,8 @@ pub fn cmd_tipping(args: TippingRunArgs) {
     );
     println!(
         "  → 収束先: {:?}",
-        traj.final_equilibrium.map(|e| equilibrium_kind_label(e.kind))
+        traj.final_equilibrium
+            .map(|e| equilibrium_kind_label(e.kind))
     );
     println!("CSV → {}/{{...,trajectory}}.csv", output_dir);
     println!("分類 → {}/tipping_classification.json", output_dir);

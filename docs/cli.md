@@ -32,6 +32,8 @@ cargo run --release -- run \
 | `--n-a`, `--n-b` | 0 (auto) | Number of agents per group (if 0, computed as equal counts from `--vacant-rate`) |
 | `--threshold` | 0.333 | Tolerance threshold τ (used only when `--rule` is not given) |
 | `--rule` | — | Satisfaction rule string (see below) |
+| `--move-mode` | `standard` | Move operation mode (see below): `standard` or `strict` |
+| `--move-strategy` | `nearest` | Move-target selection: `nearest` or `best-local` |
 | `--vacant-rate` | 0.30 | Vacancy rate |
 | `--seed` | — | Random seed |
 | `--snapshot-interval` | 1 | Snapshot save interval (0 = do not save) |
@@ -57,6 +59,40 @@ cargo run --release -- run --rule min-same:3
 # Integrationist (satisfied with 3–6 same-color neighbors; moves if too many)
 cargo run --release -- run --rule bounded:3:6
 ```
+
+### Move operation mode (`--move-mode`)
+
+The paper distinguishes two operation forms for how agents relocate.
+
+| Mode | Meaning | Paper figure |
+|------|---------|--------------|
+| `standard` | Lenient operation: only dissatisfied agents move (default) | Fig. 9–14 |
+| `strict` | Strict operation: in addition to dissatisfied agents, satisfied agents also make speculative moves to any vacant cell that strictly increases their same-color ratio | Fig. 8 |
+
+```bash
+# Strict operation (Fig. 8): much sharper separation than lenient operation
+cargo run --release -- run --threshold 0.5 --move-mode strict
+```
+
+Under strict operation, satisfied agents keep seeking more homogeneous neighborhoods, so the equilibrium is markedly more segregated than under lenient operation. The run stops once neither dissatisfied moves nor speculative improvements remain.
+
+### Move-target strategy (`--move-strategy`)
+
+Controls which satisfying vacant cell a moving agent chooses.
+
+| Strategy | Meaning | Paper figure |
+|----------|---------|--------------|
+| `nearest` | The first satisfying vacant cell in ascending Chebyshev distance (default) | Fig. 7–14 |
+| `best-local` | Among all satisfying vacant cells, the one that maximizes the post-move same-color ratio (ties broken by nearest distance, then row-major order) | Fig. 12 |
+
+`best-local` makes minority members coalesce into the most homogeneous available block, which raises the minority-cluster ratio for the unequal-numbers case (Fig. 12) toward the paper's reported level (> 80%).
+
+```bash
+# Unequal numbers (Fig. 12), best-local strategy to tighten the minority cluster
+cargo run --release -- run --n-a 97 --n-b 49 --threshold 0.333 --move-strategy best-local
+```
+
+`--move-mode` and `--move-strategy` are independent and may be combined. The `sweep` subcommand always uses `standard` / `nearest`.
 
 **Output files:**
 
@@ -151,8 +187,16 @@ cargo run --release -- tipping --preset fig31 --asymmetry "w_in=0.5:w_out=2.0:b_
 |-----|--------|-----------|---------------------|
 | `fig18` | Fig. 18 | Linear, 1:2 ratio | Two stable endpoints + unstable mix |
 | `fig19` | Fig. 19 | Steep slope (median = 1.5) | Two endpoints + stable mix |
+| `fig20` | Fig. 20 | Lenient linear (R_max = 3, symmetric) | Reaction-curve peak rises (wider mixing range) |
+| `fig21` | Fig. 21 | Steep linear (R_max = 1, symmetric) | Reaction-curve peak falls (sharper separation) |
 | `fig22` | Fig. 22 | Unequal numbers, curves do not intersect | No mixed equilibrium |
 | `fig23` | Fig. 23 | Entry-cap quota | Quota produces a mix |
+| `fig24` | Fig. 24 | Asymmetric tolerance (W R_max = 2, B R_max = 1) | Mixed equilibrium shifts off-center |
+| `fig25` | Fig. 25 | Affine with zero-tolerance intercept | Stronger endpoint outflow |
+| `fig26` | Fig. 26 | Capacity constraint C = 120 | Mixed equilibrium sits on the capacity line |
+| `fig27` | Fig. 27 | Piecewise-linear (S-shaped CDF) | Non-uniform tolerance distribution |
+| `fig28` | Fig. 28 | Unequal numbers + tolerant minority (R_max = 4) | Mixed equilibrium survives |
+| `fig29` | Fig. 29 | Strong quota (B pop_max = 20) | Mixed equilibrium pinned to low B |
 | `fig30a` | Fig. 30a | B extremely tolerant | In-tipping only |
 | `fig30b` | Fig. 30b | Same structure as Fig. 18 | Out-tipping only |
 | `fig31` | Fig. 31 | W intolerant + B tolerant | Both tipping (classic white flight) |

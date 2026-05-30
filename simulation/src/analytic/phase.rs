@@ -115,7 +115,12 @@ impl PhaseConfig {
             }
             _ => Stability::Unstable,
         };
-        Equilibrium { w, b, kind, stability }
+        Equilibrium {
+            w,
+            b,
+            kind,
+            stability,
+        }
     }
 
     /// 混合均衡を Brent 法で探索する．
@@ -328,7 +333,11 @@ where
             let cond1 = (s - (3.0 * a + b) / 4.0) * (s - b) >= 0.0;
             let cond2 = (s - b).abs() >= (b - c).abs() / 2.0;
             let cond3 = (b - c).abs() < tol;
-            let s = if cond1 || cond2 || cond3 { (a + b) / 2.0 } else { s };
+            let s = if cond1 || cond2 || cond3 {
+                (a + b) / 2.0
+            } else {
+                s
+            };
             let fs = f(s);
             d = e;
             e = b - s;
@@ -348,7 +357,11 @@ where
             } else {
                 (a + b) / 2.0
             };
-            let s = if (s - b).abs() < tol { (a + b) / 2.0 } else { s };
+            let s = if (s - b).abs() < tol {
+                (a + b) / 2.0
+            } else {
+                s
+            };
             let fs = f(s);
             d = e;
             e = b - s;
@@ -384,8 +397,14 @@ mod tests {
     #[test]
     fn fig18_two_endpoint_equilibria() {
         let cfg = PhaseConfig {
-            w_schedule: ToleranceSchedule::Linear { r_max: 2.0, pop_max: 100.0 },
-            b_schedule: ToleranceSchedule::Linear { r_max: 2.0, pop_max: 50.0 },
+            w_schedule: ToleranceSchedule::Linear {
+                r_max: 2.0,
+                pop_max: 100.0,
+            },
+            b_schedule: ToleranceSchedule::Linear {
+                r_max: 2.0,
+                pop_max: 50.0,
+            },
             capacity: None,
         };
         let eqs = cfg.equilibria();
@@ -395,8 +414,14 @@ mod tests {
         assert!(eqs.iter().any(|e| e.kind == EquilibriumKind::AllBlack));
 
         // 端点は安定であること
-        let all_w = eqs.iter().find(|e| e.kind == EquilibriumKind::AllWhite).unwrap();
-        let all_b = eqs.iter().find(|e| e.kind == EquilibriumKind::AllBlack).unwrap();
+        let all_w = eqs
+            .iter()
+            .find(|e| e.kind == EquilibriumKind::AllWhite)
+            .unwrap();
+        let all_b = eqs
+            .iter()
+            .find(|e| e.kind == EquilibriumKind::AllBlack)
+            .unwrap();
         assert_eq!(all_w.stability, Stability::Stable);
         assert_eq!(all_b.stability, Stability::Stable);
     }
@@ -407,8 +432,14 @@ mod tests {
     #[test]
     fn region_classification_at_origin_is_both_viable() {
         let cfg = PhaseConfig {
-            w_schedule: ToleranceSchedule::Linear { r_max: 2.0, pop_max: 100.0 },
-            b_schedule: ToleranceSchedule::Linear { r_max: 2.0, pop_max: 100.0 },
+            w_schedule: ToleranceSchedule::Linear {
+                r_max: 2.0,
+                pop_max: 100.0,
+            },
+            b_schedule: ToleranceSchedule::Linear {
+                r_max: 2.0,
+                pop_max: 100.0,
+            },
             capacity: None,
         };
         // (10, 10): 両反応曲線とも値十分大．両viable のはず．
@@ -439,18 +470,30 @@ mod tests {
             capacity: None,
         };
         let eqs = cfg.equilibria();
-        let n_mixed = eqs.iter().filter(|e| e.kind == EquilibriumKind::Mixed).count();
+        let n_mixed = eqs
+            .iter()
+            .filter(|e| e.kind == EquilibriumKind::Mixed)
+            .count();
         // 対称ケースなのでちょうど W=B の対角線上に1点 (または0点) のはず．
         // 重要なのは混合均衡が検出される能力があること．
-        assert!(n_mixed >= 1, "対称・寛容スケジュールでは混合均衡が少なくとも1点出るべき");
+        assert!(
+            n_mixed >= 1,
+            "対称・寛容スケジュールでは混合均衡が少なくとも1点出るべき"
+        );
     }
 
     /// ベクトル場の生成: 全象限のサンプルが領域分類される．
     #[test]
     fn vector_field_covers_grid() {
         let cfg = PhaseConfig {
-            w_schedule: ToleranceSchedule::Linear { r_max: 2.0, pop_max: 100.0 },
-            b_schedule: ToleranceSchedule::Linear { r_max: 2.0, pop_max: 50.0 },
+            w_schedule: ToleranceSchedule::Linear {
+                r_max: 2.0,
+                pop_max: 100.0,
+            },
+            b_schedule: ToleranceSchedule::Linear {
+                r_max: 2.0,
+                pop_max: 50.0,
+            },
             capacity: None,
         };
         let field = cfg.vector_field(10, 10);
@@ -466,8 +509,14 @@ mod tests {
     #[test]
     fn capacity_constraint_filters_vector_field() {
         let cfg = PhaseConfig {
-            w_schedule: ToleranceSchedule::Linear { r_max: 2.0, pop_max: 100.0 },
-            b_schedule: ToleranceSchedule::Linear { r_max: 2.0, pop_max: 100.0 },
+            w_schedule: ToleranceSchedule::Linear {
+                r_max: 2.0,
+                pop_max: 100.0,
+            },
+            b_schedule: ToleranceSchedule::Linear {
+                r_max: 2.0,
+                pop_max: 100.0,
+            },
             capacity: Some(100.0),
         };
         let field = cfg.vector_field(10, 10);

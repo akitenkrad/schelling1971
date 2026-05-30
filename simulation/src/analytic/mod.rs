@@ -11,10 +11,10 @@
 //! - [`preset`]      論文準拠のプリセット設定．
 //! - [`runner`]      CLI から呼ばれる I/O オーケストレーション．
 
-pub mod tolerance;
-pub mod reaction;
-pub mod phase;
 pub mod dynamics;
-pub mod tipping;
+pub mod phase;
 pub mod preset;
+pub mod reaction;
 pub mod runner;
+pub mod tipping;
+pub mod tolerance;
