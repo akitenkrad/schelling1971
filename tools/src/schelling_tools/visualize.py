@@ -46,10 +46,9 @@ CMAP = mpl.colors.ListedColormap([COLOR_EMPTY, COLOR_A, COLOR_B])
 NORM = mpl.colors.BoundaryNorm([0, 0.5, 1.5, 2.5], CMAP.N)
 
 LEGEND_PATCHES = [
-    mpatches.Patch(color=COLOR_A,     label="集団 A"),
-    mpatches.Patch(color=COLOR_B,     label="集団 B"),
-    mpatches.Patch(color=COLOR_EMPTY, label="空き",
-                   edgecolor="#CCCCCC", linewidth=0.5),
+    mpatches.Patch(facecolor=COLOR_A,     edgecolor="black", linewidth=0.8, label="集団 A"),
+    mpatches.Patch(facecolor=COLOR_B,     edgecolor="black", linewidth=0.8, label="集団 B"),
+    mpatches.Patch(facecolor=COLOR_EMPTY, edgecolor="black", linewidth=0.8, label="空き"),
 ]
 
 # --------------------------------------------------------------------------- #
@@ -242,7 +241,7 @@ def save_animation(
         gridspec_kw={"width_ratios": [1, 1.3]},
         facecolor=COLOR_BG,
     )
-    fig.suptitle("Schelling 分離モデル — シミュレーション進行", fontsize=12)
+    # タイトル (suptitle) は表示しない
 
     ax_grid, ax_metrics = axes
 
@@ -254,8 +253,17 @@ def save_animation(
     )
     ax_grid.set_xticks([])
     ax_grid.set_yticks([])
+    # GIF 専用: セルの色見本を黒線で囲む
+    anim_legend_patches = [
+        mpatches.Patch(facecolor=COLOR_A, edgecolor="black", linewidth=0.8,
+                       label="集団 A"),
+        mpatches.Patch(facecolor=COLOR_B, edgecolor="black", linewidth=0.8,
+                       label="集団 B"),
+        mpatches.Patch(facecolor=COLOR_EMPTY, edgecolor="black", linewidth=0.8,
+                       label="空き"),
+    ]
     ax_grid.legend(
-        handles=LEGEND_PATCHES, loc="upper right",
+        handles=anim_legend_patches, loc="upper right",
         fontsize=7, framealpha=0.85,
         handlelength=1.0, handleheight=0.8,
     )

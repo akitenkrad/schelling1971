@@ -13,7 +13,7 @@ Outputs:
     ├── sweep_pct_no_opposite.png ← 異色近隣なし割合
     ├── sweep_convergence.png     ← 収束速度 (最終イテレーション数)
     ├── sweep_overview.png        ← 2×2 パネル概要図
-    └── sweep_grid_animation.gif  ← パラメータ組み合わせ別のグリッドアニメーション
+    └── animation.gif            ← パラメータ組み合わせ別のグリッドアニメーション
                                     (sweep を --snapshot-interval > 0 で実行した場合のみ)
 """
 
@@ -25,13 +25,14 @@ import os
 import sys
 
 import matplotlib.animation as animation
+import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
 from schelling_tools.visualize import (
     CMAP,
-    LEGEND_PATCHES,
+    COLOR_EMPTY,
     NORM,
     load_all_snapshots,
 )
@@ -493,7 +494,7 @@ def save_grid_animation(
     out_path: str,
     *,
     seed: int | None = None,
-    fps: int = 5,
+    fps: float = 5,
     max_frames: int = 0,
     subtitle: str = "",
 ) -> bool:
@@ -577,14 +578,8 @@ def save_grid_animation(
     fig, axes = plt.subplots(
         n_rows, n_cols, figsize=(fig_w, fig_h), facecolor=COLOR_BG, squeeze=False,
     )
-    header = f"seed={seed}"
-    if subtitle:
-        header = f"{subtitle}，{header}"
-    # 副題込みで suptitle を 2 行表示する (overlap 回避のため fig.text を使わない)
-    fig.suptitle(
-        f"Schelling 分離モデル — パラメータ組み合わせ別アニメーション\n{header}",
-        fontsize=12,
-    )
+    # タイトル (suptitle) は表示しない
+    _ = (seed, subtitle)
 
     ims: list[plt.AxesImage | None] = []
     titles: list[plt.Text | None] = []
@@ -621,8 +616,17 @@ def save_grid_animation(
         titles.append(title)
 
     # 凡例は figure レベルで一度だけ描画
+    # GIF 専用: セルの色見本を黒線で囲む
+    legend_patches = [
+        mpatches.Patch(facecolor=COLOR_A, edgecolor="black", linewidth=0.8,
+                       label="集団 A"),
+        mpatches.Patch(facecolor=COLOR_B, edgecolor="black", linewidth=0.8,
+                       label="集団 B"),
+        mpatches.Patch(facecolor=COLOR_EMPTY, edgecolor="black", linewidth=0.8,
+                       label="空き"),
+    ]
     fig.legend(
-        handles=LEGEND_PATCHES,
+        handles=legend_patches,
         loc="lower center",
         ncol=3,
         fontsize=8,
@@ -650,8 +654,8 @@ def save_grid_animation(
         interval=1000 // max(fps, 1),
     )
 
-    # 行ごとの 2 行タイトル分の余白を確保
-    fig.tight_layout(rect=[0, 0.05, 1, 0.92])
+    # 行ごとの 2 行タイトル分の余白を確保 (suptitle なしのため上端を広く使う)
+    fig.tight_layout(rect=[0, 0.05, 1, 0.98])
     fig.subplots_adjust(hspace=0.45, wspace=0.15)
     ani.save(out_path, writer="pillow", fps=fps, dpi=90)
     plt.close(fig)
@@ -686,7 +690,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="グリッドアニメーションで使用する seed (default: 先頭シード)",
     )
     p.add_argument(
-        "--fps", type=int, default=5,
+        "--fps", type=float, default=5,
         help="グリッドアニメーションの FPS (default: 5)",
     )
     p.add_argument(
@@ -757,7 +761,7 @@ def main(argv: list[str] | None = None) -> None:
         print("[6/6] パラメータ組み合わせ別グリッドアニメーションを生成中 ...")
         save_grid_animation(
             sweep_dir, df, sweep_type, sweep_cols,
-            os.path.join(out_dir, "sweep_grid_animation.gif"),
+            os.path.join(out_dir, "animation.gif"),
             seed=args.grid_seed,
             fps=args.fps,
             max_frames=args.max_frames,
