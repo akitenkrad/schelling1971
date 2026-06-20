@@ -70,7 +70,7 @@ struct ReactionRow {
 
 #[derive(Serialize)]
 struct EquilibriumRow {
-    w: f64,
+    a: f64,
     b: f64,
     kind: String,
     stability: String,
@@ -78,9 +78,9 @@ struct EquilibriumRow {
 
 #[derive(Serialize)]
 struct VectorRow {
-    w: f64,
+    a: f64,
     b: f64,
-    dw_sign: f64,
+    da_sign: f64,
     db_sign: f64,
     region: String,
 }
@@ -88,15 +88,15 @@ struct VectorRow {
 #[derive(Serialize)]
 struct TrajectoryRow {
     t: f64,
-    w: f64,
+    a: f64,
     b: f64,
 }
 
 #[derive(Serialize)]
 struct BasinRow {
-    w0: f64,
+    a0: f64,
     b0: f64,
-    final_w: f64,
+    final_a: f64,
     final_b: f64,
     converged: bool,
     converged_kind: String,
@@ -109,8 +109,8 @@ struct BasinRow {
 
 fn equilibrium_kind_label(kind: EquilibriumKind) -> &'static str {
     match kind {
-        EquilibriumKind::AllWhite => "all_white",
-        EquilibriumKind::AllBlack => "all_black",
+        EquilibriumKind::AllWhite => "all_a",
+        EquilibriumKind::AllBlack => "all_b",
         EquilibriumKind::Mixed => "mixed",
         EquilibriumKind::Empty => "empty",
     }
@@ -167,7 +167,7 @@ fn make_output_dir(base: &str, suffix: &str) -> String {
 
 /// 共通: スケジュール・反応曲線・平衡点・ベクトル場 CSV を出力する．
 fn dump_phase_artifacts(phase: &PhaseConfig, output_dir: &str) -> Vec<Equilibrium> {
-    // tolerance_w.csv / tolerance_b.csv
+    // tolerance_a.csv / tolerance_b.csv
     let n_samples = 200;
     let w_sched_rows: Vec<ScheduleRow> = phase
         .w_schedule
@@ -181,10 +181,10 @@ fn dump_phase_artifacts(phase: &PhaseConfig, output_dir: &str) -> Vec<Equilibriu
         .into_iter()
         .map(|(r, f)| ScheduleRow { r, f_r: f })
         .collect();
-    write_csv(&format!("{}/tolerance_w.csv", output_dir), &w_sched_rows);
+    write_csv(&format!("{}/tolerance_a.csv", output_dir), &w_sched_rows);
     write_csv(&format!("{}/tolerance_b.csv", output_dir), &b_sched_rows);
 
-    // reaction_curve_w.csv / reaction_curve_b.csv
+    // reaction_curve_a.csv / reaction_curve_b.csv
     let w_react_rows: Vec<ReactionRow> = phase
         .w_reaction()
         .sample(n_samples)
@@ -204,7 +204,7 @@ fn dump_phase_artifacts(phase: &PhaseConfig, output_dir: &str) -> Vec<Equilibriu
         })
         .collect();
     write_csv(
-        &format!("{}/reaction_curve_w.csv", output_dir),
+        &format!("{}/reaction_curve_a.csv", output_dir),
         &w_react_rows,
     );
     write_csv(
@@ -217,7 +217,7 @@ fn dump_phase_artifacts(phase: &PhaseConfig, output_dir: &str) -> Vec<Equilibriu
     let eq_rows: Vec<EquilibriumRow> = eqs
         .iter()
         .map(|e| EquilibriumRow {
-            w: e.w,
+            a: e.w,
             b: e.b,
             kind: equilibrium_kind_label(e.kind).to_string(),
             stability: stability_label(e.stability).to_string(),
@@ -230,9 +230,9 @@ fn dump_phase_artifacts(phase: &PhaseConfig, output_dir: &str) -> Vec<Equilibriu
     let field_rows: Vec<VectorRow> = field
         .into_iter()
         .map(|s| VectorRow {
-            w: s.w,
+            a: s.w,
             b: s.b,
-            dw_sign: s.dw_sign,
+            da_sign: s.dw_sign,
             db_sign: s.db_sign,
             region: region_label(s.region).to_string(),
         })
@@ -279,7 +279,7 @@ pub fn cmd_bnm(args: BnmRunArgs) {
         .iter()
         .map(|p| TrajectoryRow {
             t: p.t,
-            w: p.w,
+            a: p.w,
             b: p.b,
         })
         .collect();
@@ -383,9 +383,9 @@ pub fn cmd_tipping(args: TippingRunArgs) {
     // ティッピング類型分類
     let classification = classify_tipping(&args.tipping.phase);
     println!(
-        "ティッピング類型: {} (全W安定={}, 安定混合={})",
+        "ティッピング類型: {} (全A安定={}, 安定混合={})",
         tipping_type_label(classification.tipping_type),
-        classification.all_white_stable,
+        classification.all_a_stable,
         classification.mixed_stable_exists,
     );
 
@@ -396,7 +396,7 @@ pub fn cmd_tipping(args: TippingRunArgs) {
         .iter()
         .map(|p| TrajectoryRow {
             t: p.t,
-            w: p.w,
+            a: p.w,
             b: p.b,
         })
         .collect();
@@ -407,7 +407,7 @@ pub fn cmd_tipping(args: TippingRunArgs) {
         &format!("{}/tipping_classification.json", output_dir),
         &serde_json::json!({
             "type": tipping_type_label(classification.tipping_type),
-            "all_white_stable": classification.all_white_stable,
+            "all_a_stable": classification.all_a_stable,
             "mixed_stable_exists": classification.mixed_stable_exists,
         }),
     );
@@ -477,9 +477,9 @@ pub fn cmd_bnm_basin(args: BnmBasinArgs) {
     let basin_rows: Vec<BasinRow> = basin
         .iter()
         .map(|s| BasinRow {
-            w0: s.w0,
+            a0: s.w0,
             b0: s.b0,
-            final_w: s.final_w,
+            final_a: s.final_w,
             final_b: s.final_b,
             converged: s.converged,
             converged_kind: s

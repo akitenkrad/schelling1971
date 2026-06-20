@@ -7,12 +7,12 @@ Usage:
 
 Inputs (results_dir 配下に置かれる Rust 出力):
     config.json
-    tolerance_w.csv / tolerance_b.csv          # CDF (R, F(R))
-    reaction_curve_w.csv / reaction_curve_b.csv  # (own, max_other)
-    equilibria.csv                              # (w, b, kind, stability)
-    vector_field.csv                            # (w, b, dw_sign, db_sign, region)
-    trajectory.csv                              # (t, w, b)  (bnm 単発のみ)
-    basin.csv                                   # (w0, b0, ..., converged_kind)  (bnm-basin のみ)
+    tolerance_a.csv / tolerance_b.csv          # CDF (R, F(R))
+    reaction_curve_a.csv / reaction_curve_b.csv  # (own, max_other)
+    equilibria.csv                              # (a, b, kind, stability)
+    vector_field.csv                            # (a, b, da_sign, db_sign, region)
+    trajectory.csv                              # (t, a, b)  (bnm 単発のみ)
+    basin.csv                                   # (a0, b0, ..., converged_kind)  (bnm-basin のみ)
 
 Outputs (output_dir):
     tolerance_schedules.png
@@ -38,23 +38,23 @@ import pandas as pd
 plt.rcParams["font.family"] = "Hiragino Sans"
 
 # 色設定
-COLOR_W_CURVE = "#1f77b4"   # 白人反応曲線 (青)
-COLOR_B_CURVE = "#d62728"   # 黒人反応曲線 (赤)
+COLOR_W_CURVE = "#1f77b4"   # 集団A反応曲線 (青)
+COLOR_B_CURVE = "#d62728"   # 集団B反応曲線 (赤)
 COLOR_TRAJECTORY = "#2ca02c"  # 軌跡 (緑)
 COLOR_INITIAL = "#ff7f0e"   # 初期点 (橙)
 COLOR_CAPACITY = "#7f7f7f"  # 容量制約線 (灰)
 
 EQUILIBRIUM_COLORS = {
-    "all_white": COLOR_W_CURVE,
-    "all_black": COLOR_B_CURVE,
+    "all_a": COLOR_W_CURVE,
+    "all_b": COLOR_B_CURVE,
     "mixed": "#9467bd",
     "empty": "#7f7f7f",
 }
 
 # basin 用カラーマップ
 BASIN_COLORS = {
-    "all_white": COLOR_W_CURVE,
-    "all_black": COLOR_B_CURVE,
+    "all_a": COLOR_W_CURVE,
+    "all_b": COLOR_B_CURVE,
     "mixed": "#9467bd",
     "empty": "#bcbd22",
     "none": "#cccccc",
@@ -89,9 +89,9 @@ def load_artifacts(results_dir: str) -> dict:
     out["phase"] = _extract_phase(out["config"])
 
     for name in [
-        "tolerance_w",
+        "tolerance_a",
         "tolerance_b",
-        "reaction_curve_w",
+        "reaction_curve_a",
         "reaction_curve_b",
         "equilibria",
         "vector_field",
@@ -110,9 +110,9 @@ def load_artifacts(results_dir: str) -> dict:
 def plot_tolerance_schedules(art: dict, output_path: str) -> None:
     """許容限界スケジュール F(R) の CDF プロット．"""
     fig, ax = plt.subplots(figsize=(8, 5))
-    if art["tolerance_w"] is not None:
-        df = art["tolerance_w"]
-        ax.plot(df["r"], df["f_r"], color=COLOR_W_CURVE, linewidth=2, label="W: $F_W(R)$")
+    if art["tolerance_a"] is not None:
+        df = art["tolerance_a"]
+        ax.plot(df["r"], df["f_r"], color=COLOR_W_CURVE, linewidth=2, label="A: $F_A(R)$")
     if art["tolerance_b"] is not None:
         df = art["tolerance_b"]
         ax.plot(df["r"], df["f_r"], color=COLOR_B_CURVE, linewidth=2, label="B: $F_B(R)$")
@@ -129,15 +129,15 @@ def plot_tolerance_schedules(art: dict, output_path: str) -> None:
 def plot_reaction_curves(art: dict, output_path: str) -> None:
     """位相平面 (W, B) 上の反応曲線．"""
     fig, ax = plt.subplots(figsize=(7, 7))
-    if art["reaction_curve_w"] is not None:
-        df = art["reaction_curve_w"]
+    if art["reaction_curve_a"] is not None:
+        df = art["reaction_curve_a"]
         ax.plot(df["own"], df["max_other"], color=COLOR_W_CURVE, linewidth=2,
-                label="$B_W(W)$ — W の反応曲線")
+                label="$B_A(A)$ — 集団A の反応曲線")
     if art["reaction_curve_b"] is not None:
         df = art["reaction_curve_b"]
-        # B の反応曲線は (own=B, max_other=W_B(B))，W軸/B軸を入替えてプロット
+        # 集団B の反応曲線は (own=B, max_other=A_B(B))，A軸/B軸を入替えてプロット
         ax.plot(df["max_other"], df["own"], color=COLOR_B_CURVE, linewidth=2,
-                label="$W_B(B)$ — B の反応曲線")
+                label="$A_B(B)$ — 集団B の反応曲線")
 
     # 容量制約線
     phase = art.get("phase")
@@ -153,11 +153,11 @@ def plot_reaction_curves(art: dict, output_path: str) -> None:
             color = EQUILIBRIUM_COLORS.get(row["kind"], "#000000")
             marker = "o" if row["stability"] == "stable" else "x"
             size = 200 if row["stability"] == "stable" else 150
-            ax.scatter(row["w"], row["b"], c=color, marker=marker, s=size,
+            ax.scatter(row["a"], row["b"], c=color, marker=marker, s=size,
                        edgecolors="black", linewidths=1.2, zorder=5)
 
-    ax.set_xlabel("W (白人数)")
-    ax.set_ylabel("B (黒人数)")
+    ax.set_xlabel("A (集団A数)")
+    ax.set_ylabel("B (集団B数)")
     ax.set_title("反応曲線と平衡点")
     ax.set_aspect("equal", adjustable="box")
     ax.grid(True, alpha=0.3)
@@ -190,21 +190,21 @@ def plot_phase_portrait(art: dict, output_path: str) -> None:
             b_max = phase.get("b_schedule", {}).get("pop_max", 100.0)
             scale = 0.04 * max(w_max, b_max)
         ax.quiver(
-            vf["w"], vf["b"],
-            vf["dw_sign"] * scale, vf["db_sign"] * scale,
+            vf["a"], vf["b"],
+            vf["da_sign"] * scale, vf["db_sign"] * scale,
             color="#888888", alpha=0.6, width=0.003, scale=1, scale_units="xy",
             angles="xy",
         )
 
     # 反応曲線
-    if art["reaction_curve_w"] is not None:
-        df = art["reaction_curve_w"]
+    if art["reaction_curve_a"] is not None:
+        df = art["reaction_curve_a"]
         ax.plot(df["own"], df["max_other"], color=COLOR_W_CURVE, linewidth=2,
-                label="$B_W(W)$")
+                label="$B_A(A)$")
     if art["reaction_curve_b"] is not None:
         df = art["reaction_curve_b"]
         ax.plot(df["max_other"], df["own"], color=COLOR_B_CURVE, linewidth=2,
-                label="$W_B(B)$")
+                label="$A_B(B)$")
 
     # 平衡点
     if art["equilibria"] is not None:
@@ -212,11 +212,11 @@ def plot_phase_portrait(art: dict, output_path: str) -> None:
             color = EQUILIBRIUM_COLORS.get(row["kind"], "#000000")
             marker = "o" if row["stability"] == "stable" else "x"
             size = 200 if row["stability"] == "stable" else 150
-            ax.scatter(row["w"], row["b"], c=color, marker=marker, s=size,
+            ax.scatter(row["a"], row["b"], c=color, marker=marker, s=size,
                        edgecolors="black", linewidths=1.2, zorder=5)
 
-    ax.set_xlabel("W (白人数)")
-    ax.set_ylabel("B (黒人数)")
+    ax.set_xlabel("A (集団A数)")
+    ax.set_ylabel("B (集団B数)")
     ax.set_title("位相平面 (反応曲線 + ベクトル場 + 平衡点)")
     ax.grid(True, alpha=0.3)
     ax.legend(loc="upper right")
@@ -232,21 +232,21 @@ def plot_trajectory(art: dict, output_path: str) -> None:
     fig, ax = plt.subplots(figsize=(8, 7))
 
     # 反応曲線
-    if art["reaction_curve_w"] is not None:
-        df = art["reaction_curve_w"]
+    if art["reaction_curve_a"] is not None:
+        df = art["reaction_curve_a"]
         ax.plot(df["own"], df["max_other"], color=COLOR_W_CURVE, linewidth=1.5,
-                alpha=0.6, label="$B_W(W)$")
+                alpha=0.6, label="$B_A(A)$")
     if art["reaction_curve_b"] is not None:
         df = art["reaction_curve_b"]
         ax.plot(df["max_other"], df["own"], color=COLOR_B_CURVE, linewidth=1.5,
-                alpha=0.6, label="$W_B(B)$")
+                alpha=0.6, label="$A_B(B)$")
 
     # 軌跡
     traj = art["trajectory"]
-    ax.plot(traj["w"], traj["b"], color=COLOR_TRAJECTORY, linewidth=2, label="軌跡")
-    ax.scatter([traj["w"].iloc[0]], [traj["b"].iloc[0]], c=COLOR_INITIAL, s=120,
+    ax.plot(traj["a"], traj["b"], color=COLOR_TRAJECTORY, linewidth=2, label="軌跡")
+    ax.scatter([traj["a"].iloc[0]], [traj["b"].iloc[0]], c=COLOR_INITIAL, s=120,
                marker="*", edgecolors="black", linewidths=1, zorder=5, label="初期点")
-    ax.scatter([traj["w"].iloc[-1]], [traj["b"].iloc[-1]], c=COLOR_TRAJECTORY, s=150,
+    ax.scatter([traj["a"].iloc[-1]], [traj["b"].iloc[-1]], c=COLOR_TRAJECTORY, s=150,
                marker="o", edgecolors="black", linewidths=1.2, zorder=5, label="終点")
 
     # 平衡点もマーク
@@ -254,10 +254,10 @@ def plot_trajectory(art: dict, output_path: str) -> None:
         for _, row in art["equilibria"].iterrows():
             color = EQUILIBRIUM_COLORS.get(row["kind"], "#000000")
             marker = "o" if row["stability"] == "stable" else "x"
-            ax.scatter(row["w"], row["b"], c=color, marker=marker, s=80,
+            ax.scatter(row["a"], row["b"], c=color, marker=marker, s=80,
                        edgecolors="black", linewidths=0.8, zorder=4, alpha=0.7)
 
-    ax.set_xlabel("W")
+    ax.set_xlabel("A")
     ax.set_ylabel("B")
     ax.set_title("動学軌跡 (位相平面)")
     ax.grid(True, alpha=0.3)
@@ -278,12 +278,12 @@ def plot_basin_of_attraction(art: dict, output_path: str) -> None:
     for kind in df["converged_kind"].unique():
         mask = df["converged_kind"] == kind
         color = BASIN_COLORS.get(kind, "#000000")
-        ax.scatter(df.loc[mask, "w0"], df.loc[mask, "b0"],
+        ax.scatter(df.loc[mask, "a0"], df.loc[mask, "b0"],
                    c=color, s=50, alpha=0.7, label=kind, edgecolors="none")
 
     # 反応曲線オーバーレイ
-    if art["reaction_curve_w"] is not None:
-        rc = art["reaction_curve_w"]
+    if art["reaction_curve_a"] is not None:
+        rc = art["reaction_curve_a"]
         ax.plot(rc["own"], rc["max_other"], color=COLOR_W_CURVE, linewidth=1.5,
                 linestyle="--", alpha=0.5)
     if art["reaction_curve_b"] is not None:
@@ -297,10 +297,10 @@ def plot_basin_of_attraction(art: dict, output_path: str) -> None:
             color = EQUILIBRIUM_COLORS.get(row["kind"], "#000000")
             marker = "o" if row["stability"] == "stable" else "x"
             size = 200 if row["stability"] == "stable" else 120
-            ax.scatter(row["w"], row["b"], c=color, marker=marker, s=size,
+            ax.scatter(row["a"], row["b"], c=color, marker=marker, s=size,
                        edgecolors="black", linewidths=1.2, zorder=5)
 
-    ax.set_xlabel("初期 $W_0$")
+    ax.set_xlabel("初期 $A_0$")
     ax.set_ylabel("初期 $B_0$")
     ax.set_title("吸引域 (初期条件 → 収束先)")
     ax.grid(True, alpha=0.3)

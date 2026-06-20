@@ -39,15 +39,15 @@ def annotate_classification(output_path: str, classification: dict) -> None:
     fig, ax = plt.subplots(figsize=(7, 4))
     ax.axis("off")
     label = classification.get("type", "(unknown)")
-    aw = classification.get("all_white_stable", None)
+    aw = classification.get("all_a_stable", None)
     mx = classification.get("mixed_stable_exists", None)
     text = (
         f"ティッピング類型: {label}\n\n"
-        f"  全W端点が安定: {aw}\n"
+        f"  全A端点が安定: {aw}\n"
         f"  安定混合均衡が存在: {mx}\n\n"
         f"類型解釈:\n"
-        f"  in_tipping_only   — B 反応曲線が全W点を覆う + 安定混合あり (B が流入し混合へ)\n"
-        f"  out_tipping_only  — 全W安定 + 安定混合なし (B が閾値超過で W が連鎖退出)\n"
+        f"  in_tipping_only   — B 反応曲線が全A点を覆う + 安定混合あり (B が流入し混合へ)\n"
+        f"  out_tipping_only  — 全A安定 + 安定混合なし (B が閾値超過で A が連鎖退出)\n"
         f"  both              — 上記両方の経路が存在 (典型的ホワイトフライト)\n"
         f"  neither           — 端点も混合も全て安定 (頑健な多相安定)\n"
     )

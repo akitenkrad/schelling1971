@@ -169,7 +169,7 @@ class AnalyticExperiment:
     preset: str
     init: tuple[float, float] | None = None
     # 期待値: 平衡点の (種類, 安定性) リスト，ティッピング類型 (任意)
-    expected_equilibria: list[tuple[str, str]] | None = None  # [("all_white","stable"), ...]
+    expected_equilibria: list[tuple[str, str]] | None = None  # [("all_a","stable"), ...]
     expected_tipping_type: str | None = None  # "in_tipping_only" 等
     # 期待される収束先 (軌跡)
     expected_converged_kind: str | None = None
@@ -185,8 +185,8 @@ def analytic_experiments() -> list[AnalyticExperiment]:
             preset="fig18",
             init=(50.0, 25.0),
             expected_equilibria=[
-                ("all_white", "stable"),
-                ("all_black", "stable"),
+                ("all_a", "stable"),
+                ("all_b", "stable"),
                 ("mixed", "unstable"),
             ],
         ),
@@ -198,8 +198,8 @@ def analytic_experiments() -> list[AnalyticExperiment]:
             preset="fig19",
             init=(60.0, 60.0),
             expected_equilibria=[
-                ("all_white", "stable"),
-                ("all_black", "stable"),
+                ("all_a", "stable"),
+                ("all_b", "stable"),
                 ("mixed", "stable"),
             ],
             expected_converged_kind="mixed",
@@ -239,7 +239,7 @@ def analytic_experiments() -> list[AnalyticExperiment]:
         AnalyticExperiment(
             key="fig24_asymmetric_tolerance",
             figure="Fig. 24",
-            description="非対称許容 (W:R_max=2, B:R_max=1) — 混合均衡が偏在する．",
+            description="非対称許容 (A:R_max=2, B:R_max=1) — 混合均衡が偏在する．",
             model="bnm",
             preset="fig24",
             init=(50.0, 50.0),
@@ -287,7 +287,7 @@ def analytic_experiments() -> list[AnalyticExperiment]:
         AnalyticExperiment(
             key="fig30a_in_tipping_only",
             figure="Fig. 30a",
-            description="in-tipping のみ．B 反応曲線が全W点を覆う．",
+            description="in-tipping のみ．B 反応曲線が全A点を覆う．",
             model="tipping",
             preset="fig30a",
             expected_tipping_type="in_tipping_only",
@@ -308,7 +308,7 @@ def analytic_experiments() -> list[AnalyticExperiment]:
             preset="fig31",
             init=(100.0, 15.0),
             expected_tipping_type="both",
-            expected_converged_kind="all_black",
+            expected_converged_kind="all_b",
         ),
         AnalyticExperiment(
             key="fig32_neither_tipping",
@@ -490,7 +490,7 @@ def run_analytic_experiment(exp: AnalyticExperiment, base_dir: Path) -> dict:
         with eq_path.open() as f:
             for row in csv.DictReader(f):
                 equilibria.append({
-                    "w": float(row["w"]),
+                    "a": float(row["a"]),
                     "b": float(row["b"]),
                     "kind": row["kind"],
                     "stability": row["stability"],
@@ -506,7 +506,7 @@ def run_analytic_experiment(exp: AnalyticExperiment, base_dir: Path) -> dict:
             last = rows[-1]
             traj_final = {
                 "t": float(last["t"]),
-                "w": float(last["w"]),
+                "a": float(last["a"]),
                 "b": float(last["b"]),
                 "n_steps": len(rows) - 1,
             }
@@ -535,8 +535,8 @@ def run_analytic_experiment(exp: AnalyticExperiment, base_dir: Path) -> dict:
             None,
         )
         if target is not None:
-            scale = max(50.0, max(e["w"] + e["b"] for e in equilibria))
-            d = ((target["w"] - traj_final["w"]) ** 2 +
+            scale = max(50.0, max(e["a"] + e["b"] for e in equilibria))
+            d = ((target["a"] - traj_final["a"]) ** 2 +
                  (target["b"] - traj_final["b"]) ** 2) ** 0.5
             converged_match = d < 0.05 * scale
 
@@ -544,7 +544,7 @@ def run_analytic_experiment(exp: AnalyticExperiment, base_dir: Path) -> dict:
     if classification is not None:
         print(f"    ティッピング類型: {classification.get('type')}")
     if traj_final is not None:
-        print(f"    軌跡終点: ({traj_final['w']:.2f}, {traj_final['b']:.2f}) "
+        print(f"    軌跡終点: ({traj_final['a']:.2f}, {traj_final['b']:.2f}) "
               f"({traj_final['n_steps']} ステップ)")
 
     return {

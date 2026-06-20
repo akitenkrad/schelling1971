@@ -316,7 +316,7 @@ pub enum TippingType {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct TippingClassification {
     pub tipping_type: TippingType,
-    pub all_white_stable: bool,
+    pub all_a_stable: bool,
     pub mixed_stable_exists: bool,
 }
 
@@ -361,7 +361,7 @@ pub fn classify_tipping(phase: &PhaseConfig) -> TippingClassification {
 
     TippingClassification {
         tipping_type,
-        all_white_stable,
+        all_a_stable: all_white_stable,
         mixed_stable_exists,
     }
 }
@@ -407,7 +407,7 @@ mod tests {
         let phase = fig18_phase();
         let cls = classify_tipping(&phase);
         assert_eq!(cls.tipping_type, TippingType::OutTippingOnly);
-        assert!(cls.all_white_stable);
+        assert!(cls.all_a_stable);
         assert!(!cls.mixed_stable_exists);
     }
 
@@ -417,7 +417,7 @@ mod tests {
         let phase = fig19_phase();
         let cls = classify_tipping(&phase);
         assert_eq!(cls.tipping_type, TippingType::Neither);
-        assert!(cls.all_white_stable);
+        assert!(cls.all_a_stable);
         assert!(cls.mixed_stable_exists);
     }
 
