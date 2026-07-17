@@ -129,9 +129,12 @@ impl PhaseConfig {
     /// $h(W) = W - W_B(B_W(W))$ の符号変化区間を見つけて Brent 法で根を絞る．
     /// $h(W) = 0$ ⇔ $(W, B_W(W))$ が両反応曲線上にある．
     ///
-    /// サンプルは半ステップずらした位置 $W_i = W_{\max} (i + 0.5) / n$ に取る．
-    /// 整数比の臨界点 (例: 対称ケースの $W = W_{\max}/2$) で
-    /// $h = 0$ 丁度に当たって符号判定が失敗するのを避けるため．
+    /// サンプルは半ステップずらした位置 $W_i = W_{\max} (i + 0.5) / (n + 1)$ に取る．
+    /// ただしこのずらしだけでは不十分で，`n_samples = 400` のとき $i = 200$ は
+    /// $W = W_{\max} / 2$ を厳密に踏む．対称ケース (例: $R_{\max} = 2$ の直線型で
+    /// 交点が $(50, 50)$) ではそこが根そのものになり，$h = 0$ ちょうどのため
+    /// `prev_h * cur_h < 0` が成立せず検出漏れになる．
+    /// そこで符号変化に加えて **サンプル点上の厳密な零点** も root として拾う．
     fn find_mixed_equilibria(&self) -> Vec<Equilibrium> {
         let w_max = self.w_schedule.pop_max();
         let n_samples = 400;
@@ -145,17 +148,29 @@ impl PhaseConfig {
         };
 
         let mut roots: Vec<f64> = Vec::new();
+        // 既存の根と十分離れているもののみ採択する．
+        let push_root = |roots: &mut Vec<f64>, root: f64| {
+            if !roots.iter().any(|r: &f64| (r - root).abs() < 1e-3 * w_max) {
+                roots.push(root);
+            }
+        };
+
         // 半ステップずらしたサンプル: i=0..=n に対し W = W_max*(i+0.5)/(n+1)
         let mut prev_w = 0.5 * w_max / (n_samples as f64 + 1.0);
         let mut prev_h = h(prev_w);
+        if prev_h == 0.0 {
+            push_root(&mut roots, prev_w);
+        }
         for i in 1..=n_samples {
             let w = w_max * (i as f64 + 0.5) / (n_samples as f64 + 1.0);
             let cur_h = h(w);
-            if prev_h.is_finite() && cur_h.is_finite() && prev_h * cur_h < 0.0 {
-                if let Some(root) = brent(prev_w, w, prev_h, cur_h, &h, 1e-9, 100) {
-                    // 既存の根と十分離れているもののみ採択
-                    if !roots.iter().any(|r| (r - root).abs() < 1e-3 * w_max) {
-                        roots.push(root);
+            if prev_h.is_finite() && cur_h.is_finite() {
+                if cur_h == 0.0 {
+                    // サンプル点が根を厳密に踏んだケース．
+                    push_root(&mut roots, w);
+                } else if prev_h * cur_h < 0.0 {
+                    if let Some(root) = brent(prev_w, w, prev_h, cur_h, &h, 1e-9, 100) {
+                        push_root(&mut roots, root);
                     }
                 }
             }
@@ -181,8 +196,28 @@ impl PhaseConfig {
             .collect()
     }
 
-    /// 混合均衡の安定性．反応曲線の交差方向で判定する．
-    /// $h(W) = W - W_B(B_W(W))$ の傾きが正なら不安定 (左から右に交差)，負なら安定．
+    /// 混合均衡の安定性．反応曲線の交差方向 ($h$ が根を横切る向き) で判定する．
+    /// $h(W) = W - W_B(B_W(W))$ が減少しながら根を横切れば安定，増加しながらなら不安定．
+    ///
+    /// 非縮退な場合これは $h'(W^*) = 1 - B_W' W_B' < 0$，すなわち流れ場のヤコビ行列の
+    /// $\det J > 0$ と同値である (流れ場のトレースは常に $-(k_W + k_B) < 0$ なので
+    /// 行列式の符号だけで安定性が決まる)．
+    ///
+    /// **縮退ケースの扱い**: $B_W'(W^*) W_B'(B^*) = 1$ ちょうどのとき $h'(W^*) = 0$ となり
+    /// 線形化では判定できない (零固有値)．対称アフィン $F = c + sR$ で $R_{\max} = 3$ の
+    /// とき，まさにこれが起きる (fig20 / fig25)．このとき $h$ は $W^*$ で3位の零点をもち
+    /// $h(W^* + x) = 2x^3/s^2 + O(x^4)$ となる．中心多様体 $u = -v^2/(4s)$ 上へ縮約すると
+    /// $v = W - B$ の従う方程式は $\dot v = \frac{k}{4s^2} v^3 + O(v^4)$ で，係数が正なので
+    /// **不安定** (ただし発散は指数的でなく代数的で，$t^* = 1/(2Cv_0^2)$ で有限時間発散する)．
+    ///
+    /// 3位の零点は奇数位なので $h$ は根の前後で符号を変える．したがって
+    /// **傾きの値ではなく符号パターンで判定すれば**，非縮退ケースと同じ規則のまま
+    /// 縮退ケースも正しく解決できる．割線の傾き $(h(hi)-h(lo))/(hi-lo)$ を使うと
+    /// 縮退時の値が $O(h\_eps^2)$ と極端に小さくなり，`h_eps` を詰めるほど丸め誤差に
+    /// 埋もれてしまうため，ここでは商を取らず符号のみを見る．
+    ///
+    /// 根の両側で $h$ が同符号になるのは偶数位の零点で，これは片側安定 (半安定) なので
+    /// [`Stability::Saddle`] を返す．
     fn classify_mixed(&self, w: f64, _b: f64) -> Stability {
         let h_eps = (self.w_schedule.pop_max() * 1e-4).max(1e-6);
         let h = |w: f64| -> f64 {
@@ -192,12 +227,15 @@ impl PhaseConfig {
         };
         let lo = (w - h_eps).max(1e-9);
         let hi = (w + h_eps).min(self.w_schedule.pop_max() - 1e-9);
-        let slope = (h(hi) - h(lo)) / (hi - lo);
-        if slope < 0.0 {
+        let (h_lo, h_hi) = (h(lo), h(hi));
+        if h_lo > 0.0 && h_hi < 0.0 {
+            // 減少しながら根を横切る → 安定．
             Stability::Stable
-        } else if slope > 0.0 {
+        } else if h_lo < 0.0 && h_hi > 0.0 {
+            // 増加しながら根を横切る → 不安定 (3次縮退ケースもここに入る)．
             Stability::Unstable
         } else {
+            // 同符号 = 偶数位の零点 (片側安定) / 数値的に判定不能．
             Stability::Saddle
         }
     }
@@ -304,6 +342,15 @@ pub struct VectorSample {
 
 /// Brent 法による1次元根求解．
 /// `f(a)*f(b) < 0` (符号変化区間) を仮定する．
+/// `tol` は **区間幅** に対する許容誤差 (根の位置の精度) として解釈される．
+///
+/// 収束判定に関数値 `|f(b)| < tol` を併用してはならない．重根では $f$ が根の周りで
+/// 極端に平坦になり，根から遠い点でも $|f|$ が小さくなるため精度が出ないためである．
+/// 実際 $h$ が3位の零点をもつ縮退ケース ($R_{\max} = 3$ の対称アフィン) では
+/// $h \approx 2x^3/s^2$ なので，`tol = 1e-9` に対し $|h| < $ `tol` は $|x| < 8.2\times10^{-3}$
+/// を意味してしまい，根の位置が3桁も甘くなる．区間幅で判定すれば
+/// 符号が信頼できる限り2分法が効くので，桁落ちで $h$ の符号が潰れる
+/// $|x| \approx 2\times10^{-4}$ 付近まで詰められる．
 fn brent<F>(a0: f64, b0: f64, fa0: f64, fb0: f64, f: &F, tol: f64, max_iter: usize) -> Option<f64>
 where
     F: Fn(f64) -> f64,
@@ -321,7 +368,7 @@ where
     let mut d = b - a;
     let mut e = d;
     for _ in 0..max_iter {
-        if fb.abs() < tol || (b - a).abs() < tol {
+        if fb == 0.0 || (b - a).abs() < tol {
             return Some(b);
         }
         if fa != fc && fb != fc {
@@ -391,6 +438,132 @@ mod tests {
 
     fn approx(a: f64, b: f64, tol: f64) -> bool {
         (a - b).abs() <= tol
+    }
+
+    /// 縮退ケース (fig20 / fig25): 対称アフィン $F = c + sR$ で $R_{\max} = 3$ のとき
+    /// $B_W'(W^*) W_B'(B^*) = 1$ ちょうどとなり $\det J = 0$，線形化では判定できない．
+    /// $h$ は3位の零点をもち $h(W^* + x) = 2x^3/s^2$ となるため，中心多様体上の
+    /// 縮約 $\dot v = \frac{k}{4s^2}v^3$ (係数 > 0) から **不安定** が正しい．
+    ///
+    /// `classify_mixed` は割線の値ではなく符号パターンで判定するのでこれを解決できる．
+    /// 商を取る実装に戻すと縮退時の傾きが $O(h\_eps^2)$ となり丸め誤差に埋もれるため，
+    /// この回帰テストで固定する．
+    #[test]
+    fn degenerate_r_max_3_mixed_equilibrium_is_unstable() {
+        // fig20 相当: 直線型 R_max=3 (c=0, s=100/3, M=100) -> W* = M - s = 66.67
+        let fig20 = PhaseConfig {
+            w_schedule: ToleranceSchedule::Linear {
+                r_max: 3.0,
+                pop_max: 100.0,
+            },
+            b_schedule: ToleranceSchedule::Linear {
+                r_max: 3.0,
+                pop_max: 100.0,
+            },
+            capacity: None,
+        };
+        let mixed: Vec<_> = fig20
+            .equilibria()
+            .into_iter()
+            .filter(|e| e.kind == EquilibriumKind::Mixed)
+            .collect();
+        assert_eq!(mixed.len(), 1, "混合均衡は1つ: {mixed:?}");
+        // 3重根なので根の位置そのものの精度は落ちる (下記 fig25 のコメント参照)．
+        assert!(approx(mixed[0].w, 200.0 / 3.0, 1e-2), "W*={}", mixed[0].w);
+        assert_eq!(
+            mixed[0].stability,
+            Stability::Unstable,
+            "det J = 0 の縮退点だが3次項により不安定"
+        );
+
+        // fig25 相当: アフィン F = 10 + 30R (M=90, s=30, R_max=3) -> W* = 60
+        let fig25 = PhaseConfig {
+            w_schedule: ToleranceSchedule::Affine {
+                intercept_pop: 10.0,
+                slope: 30.0,
+                pop_max: 100.0,
+            },
+            b_schedule: ToleranceSchedule::Affine {
+                intercept_pop: 10.0,
+                slope: 30.0,
+                pop_max: 100.0,
+            },
+            capacity: None,
+        };
+        let mixed: Vec<_> = fig25
+            .equilibria()
+            .into_iter()
+            .filter(|e| e.kind == EquilibriumKind::Mixed)
+            .collect();
+        assert_eq!(mixed.len(), 1, "混合均衡は1つ: {mixed:?}");
+        // 3重根でも [`brent`] が区間幅で収束判定する限りこの精度が出る
+        // (関数値 |f| < tol で打ち切ると $10^{-3}$ 程度までしか詰まらない)．
+        assert!(approx(mixed[0].w, 60.0, 1e-3), "W*={}", mixed[0].w);
+        assert_eq!(mixed[0].stability, Stability::Unstable);
+    }
+
+    /// 重根での根の精度が [`brent`] の収束判定に依存することを固定する．
+    /// 関数値ベースの打ち切り (`|f(b)| < tol`) に戻すと縮退ケースの精度が3桁落ちる．
+    #[test]
+    fn brent_resolves_triple_root_accurately() {
+        // h(x) = 2(x - 2.5)^3 / s^2 型の平坦な3重根．
+        let s: f64 = 100.0 / 3.0;
+        let f = |x: f64| 2.0 * (x - 2.5).powi(3) / (s * s);
+        let root = brent(0.0, 5.0, f(0.0), f(5.0), &f, 1e-9, 200).unwrap();
+        assert!(
+            approx(root, 2.5, 1e-4),
+            "3重根でも区間幅判定なら高精度に解ける: root={root}"
+        );
+    }
+
+    /// 縮退ケースの不安定性を動学側からも固定する．対称な初期値では $v = W - B = 0$ が
+    /// 保たれて混合均衡に留まるが，非対称摂動を与えると単独均衡へティッピングする．
+    ///
+    /// 注意: 摂動 $v_0$ は小さすぎてはいけない．3次の発散は $t^* = 1/(2Cv_0^2)$ という
+    /// 代数的な時間スケールをもち，$v_0$ が小さいと1ステップあたりの変位が
+    /// `convergence_tol` を下回って [`integrate`] が誤って「収束」と判定してしまう
+    /// (例: $v_0 = 2$ では中心多様体 $u = -v^2/(4s)$ 上に落ちた時点で停止する)．
+    /// ここでは実測で端点到達を確認済みの $v_0 = 4$ を使う．
+    #[test]
+    fn degenerate_mixed_tips_away_under_asymmetric_perturbation() {
+        use crate::analytic::dynamics::{integrate, DynamicsConfig};
+
+        let phase = PhaseConfig {
+            w_schedule: ToleranceSchedule::Linear {
+                r_max: 3.0,
+                pop_max: 100.0,
+            },
+            b_schedule: ToleranceSchedule::Linear {
+                r_max: 3.0,
+                pop_max: 100.0,
+            },
+            capacity: None,
+        };
+        let cfg = DynamicsConfig {
+            max_steps: 2_000_000,
+            ..Default::default()
+        };
+        let w_star = 200.0 / 3.0;
+
+        // 対称: v = 0 は不変なので混合均衡に留まる．
+        let sym = integrate(&phase, &cfg, (w_star, w_star));
+        let last = sym.history.last().unwrap();
+        assert!(
+            approx(last.w, w_star, 1e-2) && approx(last.b, w_star, 1e-2),
+            "対称な初期値では混合均衡に留まる: ({}, {})",
+            last.w,
+            last.b
+        );
+
+        // 非対称 (v = +4): 3次項に押されて全W 端点へ発散する．
+        let asym = integrate(&phase, &cfg, (w_star + 2.0, w_star - 2.0));
+        let last = asym.history.last().unwrap();
+        assert!(
+            last.w > 95.0 && last.b < 5.0,
+            "非対称摂動で単独均衡へティッピングする: ({}, {})",
+            last.w,
+            last.b
+        );
     }
 
     /// Fig.18 (基本ケース): 直線型，1:2 比 — 端点2均衡のみ，混合は不安定．

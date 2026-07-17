@@ -42,7 +42,15 @@ impl Default for FlowModel {
 pub struct DynamicsConfig {
     pub flow: FlowModel,
     pub max_steps: usize,
-    /// 収束判定: 連続2ステップの $\|(\Delta W, \Delta B)\|_\infty < \text{convergence\_tol}$．
+    /// 収束判定: **速度** $\|(\dot W, \dot B)\|_\infty = \|(\Delta W, \Delta B)\|_\infty / dt
+    /// < \text{convergence\_tol}$．
+    ///
+    /// 1ステップの変位 $\|(\Delta W, \Delta B)\|_\infty$ そのものと比較してはならない．
+    /// 変位は $dt$ に比例するため，$dt$ を細かくするほど閾値を下回りやすくなり，
+    /// **時間刻みを精緻化するほど誤って「収束」と判定される** ためである
+    /// (例: 縮退ケース fig20 を初期値 $(68.67, 64.67)$ から回すと，$dt = 0.1$ では
+    /// 正しく全W 端点へティッピングするのに，$dt = 0.01$ では初期値からほとんど
+    /// 動かないまま収束扱いになっていた)．速度で判定すれば $dt$ 非依存になる．
     pub convergence_tol: f64,
 }
 
@@ -105,12 +113,14 @@ pub fn integrate(phase: &PhaseConfig, cfg: &DynamicsConfig, init: (f64, f64)) ->
         };
 
         let delta = (w_next - w).abs().max((b_next - b).abs());
+        // 変位ではなく速度で判定する ($dt$ 非依存にするため．[`DynamicsConfig`] 参照)．
+        let speed = delta / dt;
         w = w_next;
         b = b_next;
         t += dt;
         history.push(TrajectoryPoint { t, w, b });
 
-        if delta < cfg.convergence_tol {
+        if speed < cfg.convergence_tol {
             converged = true;
             converged_step = Some(step + 1);
             break;
@@ -371,6 +381,49 @@ mod tests {
         let traj = integrate(&phase, &cfg, (60.0, 50.0));
         for p in &traj.history {
             assert!(p.w + p.b <= 120.0 + 1e-6, "容量超過: w+b={}", p.w + p.b);
+        }
+    }
+
+    /// 収束判定が時間刻み $dt$ に依存しないこと．
+    ///
+    /// 収束判定を1ステップ変位で行うと，変位が $dt$ に比例するために
+    /// $dt$ を細かくするほど誤って収束と判定されてしまう (時間刻みを精緻化するほど
+    /// 結果が悪化する)．縮退ケース (fig20 相当，$R_{\max} = 3$) は3次項による発散が
+    /// 遅く，このバグが最も顕在化するので回帰テストの題材に使う．
+    #[test]
+    fn convergence_verdict_is_independent_of_dt() {
+        let phase = PhaseConfig {
+            w_schedule: ToleranceSchedule::Linear {
+                r_max: 3.0,
+                pop_max: 100.0,
+            },
+            b_schedule: ToleranceSchedule::Linear {
+                r_max: 3.0,
+                pop_max: 100.0,
+            },
+            capacity: None,
+        };
+        let w_star = 200.0 / 3.0;
+        let init = (w_star + 2.0, w_star - 2.0); // v = 4 の非対称摂動
+
+        for dt in [0.1, 0.01, 0.001] {
+            let cfg = DynamicsConfig {
+                flow: FlowModel::Continuous {
+                    k_w: 1.0,
+                    k_b: 1.0,
+                    dt,
+                },
+                max_steps: 20_000_000,
+                convergence_tol: 1e-4,
+            };
+            let traj = integrate(&phase, &cfg, init);
+            let last = traj.history.last().unwrap();
+            assert!(
+                last.w > 95.0 && last.b < 5.0,
+                "dt={dt} でも全W 端点へティッピングする: ({}, {})",
+                last.w,
+                last.b
+            );
         }
     }
 

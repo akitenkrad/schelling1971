@@ -154,6 +154,9 @@ impl TippingConfig {
             };
 
             let delta = (w_next - w).abs().max((b_next - b).abs());
+            // 変位ではなく速度で判定する ($dt$ 非依存にするため．
+            // [`super::dynamics::DynamicsConfig::convergence_tol`] 参照)．
+            let speed = delta / dt;
             prev_w = w;
             prev_b = b;
             w = w_next;
@@ -161,7 +164,7 @@ impl TippingConfig {
             t += dt;
             history.push(TrajectoryPoint { t, w, b });
 
-            if delta < self.dynamics.convergence_tol {
+            if speed < self.dynamics.convergence_tol {
                 converged = true;
                 converged_step = Some(step + 1);
                 break;
