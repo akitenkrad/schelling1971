@@ -175,6 +175,40 @@ def plot_reaction_curves(art: dict, output_path: str) -> None:
     plt.close(fig)
 
 
+def _pop_maxes(art: dict) -> tuple[float, float]:
+    """母集団プールの上限 (A_max, B_max) を返す．"""
+    phase = art.get("phase")
+    w_max = b_max = 100.0
+    if phase:
+        w_max = phase.get("w_schedule", {}).get("pop_max", 100.0)
+        b_max = phase.get("b_schedule", {}).get("pop_max", 100.0)
+    return w_max, b_max
+
+
+def _plot_reaction_curves(ax, art: dict, linewidth: float, alpha: float = 1.0) -> None:
+    """反応曲線を描画する．母集団プール ($A \\le A_{max}$, $B \\le B_{max}$) の内側は
+    実線，プールを超える到達不可能な領域は破線で描く．"""
+    w_max, b_max = _pop_maxes(art)
+    # 集団A の反応曲線 B_A(A): (own=A, max_other=B)．B>B_max が到達不可能．
+    if art["reaction_curve_a"] is not None:
+        df = art["reaction_curve_a"]
+        x, y = df["own"], df["max_other"]
+        feasible = y <= b_max
+        ax.plot(x, y, color=COLOR_W_CURVE, linewidth=linewidth, alpha=alpha,
+                linestyle="--")
+        ax.plot(x.where(feasible), y.where(feasible), color=COLOR_W_CURVE,
+                linewidth=linewidth, alpha=alpha, linestyle="-", label="$B_A(A)$")
+    # 集団B の反応曲線 A_B(B): (max_other=A, own=B)．A>A_max が到達不可能．
+    if art["reaction_curve_b"] is not None:
+        df = art["reaction_curve_b"]
+        x, y = df["max_other"], df["own"]
+        feasible = x <= w_max
+        ax.plot(x, y, color=COLOR_B_CURVE, linewidth=linewidth, alpha=alpha,
+                linestyle="--")
+        ax.plot(x.where(feasible), y.where(feasible), color=COLOR_B_CURVE,
+                linewidth=linewidth, alpha=alpha, linestyle="-", label="$A_B(B)$")
+
+
 def plot_phase_portrait(art: dict, output_path: str) -> None:
     """ベクトル場 + 反応曲線 + 平衡点．"""
     fig, ax = plt.subplots(figsize=(8, 7))
@@ -183,12 +217,8 @@ def plot_phase_portrait(art: dict, output_path: str) -> None:
     if art["vector_field"] is not None:
         vf = art["vector_field"]
         # 矢印の長さは符号 × スケール
-        phase = art.get("phase")
-        scale = 1.0
-        if phase:
-            w_max = phase.get("w_schedule", {}).get("pop_max", 100.0)
-            b_max = phase.get("b_schedule", {}).get("pop_max", 100.0)
-            scale = 0.04 * max(w_max, b_max)
+        w_max, b_max = _pop_maxes(art)
+        scale = 0.04 * max(w_max, b_max)
         ax.quiver(
             vf["a"], vf["b"],
             vf["da_sign"] * scale, vf["db_sign"] * scale,
@@ -196,15 +226,8 @@ def plot_phase_portrait(art: dict, output_path: str) -> None:
             angles="xy",
         )
 
-    # 反応曲線
-    if art["reaction_curve_a"] is not None:
-        df = art["reaction_curve_a"]
-        ax.plot(df["own"], df["max_other"], color=COLOR_W_CURVE, linewidth=2,
-                label="$B_A(A)$")
-    if art["reaction_curve_b"] is not None:
-        df = art["reaction_curve_b"]
-        ax.plot(df["max_other"], df["own"], color=COLOR_B_CURVE, linewidth=2,
-                label="$A_B(B)$")
+    # 反応曲線 (プール内は実線・到達不可能領域は破線)
+    _plot_reaction_curves(ax, art, linewidth=2, alpha=1.0)
 
     # 平衡点
     if art["equilibria"] is not None:
@@ -231,15 +254,8 @@ def plot_trajectory(art: dict, output_path: str) -> None:
         return
     fig, ax = plt.subplots(figsize=(8, 7))
 
-    # 反応曲線
-    if art["reaction_curve_a"] is not None:
-        df = art["reaction_curve_a"]
-        ax.plot(df["own"], df["max_other"], color=COLOR_W_CURVE, linewidth=1.5,
-                alpha=0.6, label="$B_A(A)$")
-    if art["reaction_curve_b"] is not None:
-        df = art["reaction_curve_b"]
-        ax.plot(df["max_other"], df["own"], color=COLOR_B_CURVE, linewidth=1.5,
-                alpha=0.6, label="$A_B(B)$")
+    # 反応曲線 (プール内は実線・到達不可能領域は破線)
+    _plot_reaction_curves(ax, art, linewidth=1.5, alpha=0.6)
 
     # 軌跡
     traj = art["trajectory"]
