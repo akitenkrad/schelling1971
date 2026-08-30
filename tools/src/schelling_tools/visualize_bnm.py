@@ -5,7 +5,11 @@ visualize_bnm.py — Schelling (1971) 境界近隣モデル (BNM) 可視化ス�
 Usage:
     schelling-tools visualize-bnm [--results_dir RESULTS_DIR] [--output_dir OUTPUT_DIR]
 
-Inputs (results_dir 配下に置かれる Rust 出力):
+--results_dir を省略すると
+`runvault path --experiment schelling-analytic --latest --subcommand bnm`
+が返す run を対象にする (`--subcommand bnm-basin` で吸引域解析)．
+
+Inputs (run ディレクトリ．runvault では CSV は artifacts/ の下):
     config.json
     tolerance_a.csv / tolerance_b.csv          # CDF (R, F(R))
     reaction_curve_a.csv / reaction_curve_b.csv  # (own, max_other)
@@ -24,7 +28,6 @@ Outputs (output_dir):
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import sys
 
@@ -33,6 +36,8 @@ import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+
+from schelling_tools.runvault_io import artifacts_dir, config_parameters, figures_dir, runvault_path
 
 # 日本語フォント
 plt.rcParams["font.family"] = "Hiragino Sans"
@@ -78,15 +83,15 @@ def _extract_phase(cfg: dict | None) -> dict | None:
 
 
 def load_artifacts(results_dir: str) -> dict:
-    """BNM 出力の各 CSV / JSON を読み込んで dict で返す．"""
+    """BNM 出力の各 CSV / JSON を読み込んで dict で返す．
+
+    runvault の run では config.json は封筒なので `parameters` を開け，CSV は
+    `artifacts/` の下から読む．legacy の run はどちらも run 直下．
+    """
     out: dict = {}
-    config_path = os.path.join(results_dir, "config.json")
-    if os.path.exists(config_path):
-        with open(config_path) as f:
-            out["config"] = json.load(f)
-    else:
-        out["config"] = None
+    out["config"] = config_parameters(results_dir)
     out["phase"] = _extract_phase(out["config"])
+    csv_dir = artifacts_dir(results_dir)
 
     for name in [
         "tolerance_a",
@@ -98,7 +103,7 @@ def load_artifacts(results_dir: str) -> dict:
         "trajectory",
         "basin",
     ]:
-        path = os.path.join(results_dir, f"{name}.csv")
+        path = os.path.join(csv_dir, f"{name}.csv")
         out[name] = pd.read_csv(path) if os.path.exists(path) else None
     return out
 
@@ -330,15 +335,21 @@ def plot_basin_of_attraction(art: dict, output_path: str) -> None:
 # CLI
 # --------------------------------------------------------------------------- #
 
-def resolve_results_dir(arg: str | None) -> str:
-    """--results_dir 解決．省略時は results/latest を参照．"""
+def resolve_results_dir(
+    arg: str | None,
+    *,
+    results_root: str = "results",
+    subcommand: str = "bnm",
+    experiment: str = "schelling-analytic",
+) -> str:
+    """--results_dir 解決．省略時は runvault に直近の完了 run を聞く．
+
+    解析サブコマンドは `schelling-analytic` という別 experiment に落ちるので，
+    シミュレーション側の run と混ざらない．
+    """
     if arg:
         return arg
-    base = os.path.join(os.getcwd(), "results")
-    latest = os.path.join(base, "latest")
-    if os.path.exists(latest):
-        return latest
-    raise FileNotFoundError(f"results/latest が存在しません．--results_dir で指定してください．")
+    return runvault_path(experiment, results_root, subcommand=subcommand)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -347,13 +358,19 @@ def main(argv: list[str] | None = None) -> None:
         description="境界近隣モデル (BNM) 解析結果の可視化",
     )
     parser.add_argument("--results_dir", default=None,
-                        help="BNM 出力ディレクトリ (省略時は results/latest)")
+                        help="BNM の run ディレクトリ (省略時は runvault path --latest --subcommand bnm)")
+    parser.add_argument("--results_root", "--results-root", default="results",
+                        help="runvault の results ルート (default: results)")
+    parser.add_argument("--subcommand", default="bnm",
+                        help="対象サブコマンド (bnm / bnm-basin)")
     parser.add_argument("--output_dir", default=None,
-                        help="図の出力ディレクトリ (省略時は results_dir/figures)")
+                        help="図の出力ディレクトリ (省略時は <experiment>/figures/<run_slug>/)")
     args = parser.parse_args(argv)
 
-    results_dir = resolve_results_dir(args.results_dir)
-    output_dir = args.output_dir or os.path.join(results_dir, "figures")
+    results_dir = resolve_results_dir(
+        args.results_dir, results_root=args.results_root, subcommand=args.subcommand,
+    )
+    output_dir = args.output_dir or figures_dir(results_dir)
     os.makedirs(output_dir, exist_ok=True)
 
     print(f"[visualize-bnm] 入力: {results_dir}")

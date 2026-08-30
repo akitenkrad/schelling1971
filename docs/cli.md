@@ -96,22 +96,37 @@ cargo run --release -- run --n-a 97 --n-b 49 --threshold 0.333 --move-strategy b
 
 **Output files:**
 
-Each run is saved to a timestamped subdirectory. `results/latest` is a symbolic link to the most recent run.
+Each execution is saved as a runvault run directory. The run directory *is* the output location, so no `latest` symlink to a timestamped directory is created. Ask `runvault` for the most recent completed run:
+
+```bash
+runvault path --experiment schelling --latest --subcommand run
+```
 
 ```
 results/
-├── latest -> 20260405_153000       # symlink to the most recent run
-├── 20260405_153000/
-│   ├── metrics.csv                 # segregation metrics per step
-│   └── snapshots/
-│       ├── step_00000.csv          # initial state
-│       ├── step_00001.csv
-│       └── ...
-└── 20260405_160000/
-    └── ...
+└── schelling/                                     # experiment
+    ├── latest_finished -> run_20260405_153000_...  # the last run that finished
+    ├── run_20260405_153000_9f2c41ab_3b1d/          # <subcommand>_<time>_<cfg8>_<exec4>
+    │   ├── run.json                                # metadata (git commit / env / paper)
+    │   ├── config.json                             # envelope; the condition is under ["parameters"]
+    │   ├── metrics.csv                             # long format (step / scope / name / value)
+    │   ├── status.json                             # terminal state and duration
+    │   ├── manifest.csv                            # hashes of artifacts/ and logs/
+    │   └── artifacts/
+    │       └── snapshots/
+    │           ├── step_00000.csv                  # initial state
+    │           └── ...
+    ├── run_20260405_160000_.../
+    │   └── ...
+    └── figures/                                    # visualization output (outside the run)
+        └── run_20260405_153000_9f2c41ab_3b1d/
+            ├── metrics_timeseries.png
+            └── ...
 ```
 
-A `config.json` is also generated under `results/{timestamp}/`; see [`show-experiment-settings`](visualization.md#show-experiment-settings).
+Figures are produced after a run has finished, so they go *outside* the run directory, in `<experiment>/figures/<run_slug>/`. `manifest.csv` is fixed by `finish()`, so anything added to `artifacts/` afterwards would carry no hash.
+
+`metrics.csv` is long format, one value per row. The seven per-step metrics carry a `step`; `converged` (0.0 / 1.0) and `final_iteration`, which describe the run as a whole, are written with `scope=run` and no `step`. To print the condition, see [`show-experiment-settings`](visualization.md#show-experiment-settings).
 
 ## `sweep` (Parameter Sweep)
 
@@ -146,16 +161,21 @@ cargo run --release -- sweep --threshold 0.1:0.9:0.1 --rows 20 --cols 20
 
 **Output files:**
 
+A sweep is recorded as one parent run plus one child run per condition. The children are siblings of the parent in the experiment directory, not nested under it, and point at the parent through `lineage.parent_run_uid`. No one-row-per-condition summary CSV is written; the same values live in each child's `metrics.csv`.
+
 ```
-results/{timestamp}_sweep/
-├── sweep_summary.csv                # final metrics for every parameter combination
-├── sweep_config.json                # sweep configuration (for reproduction)
-├── tau_0.100_vac_0.300_seed_42/
-│   └── metrics.csv
-├── tau_0.200_vac_0.300_seed_42/
-│   └── metrics.csv
-└── ...
+results/
+└── schelling/
+    ├── sweep_20260405_160827_48d033b7_ee20/   # parent; parameters hold the grid definition
+    │   ├── run.json                            # has lineage.sweep_id; rng.master_seed is null
+    │   └── config.json
+    ├── run_20260405_160828_174916dd_955d/     # child; lineage.parent_run_uid = parent's run_uid
+    │   ├── metrics.csv
+    │   └── artifacts/snapshots/
+    └── ...
 ```
+
+Get the parent with `runvault path --experiment schelling --latest --subcommand sweep`. `schelling-tools visualize-sweep` takes that parent and rebuilds the former summary table from its children.
 
 ## Analytic Models — Bounded-Neighborhood Model (BNM) and Tipping Model
 

@@ -31,6 +31,14 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+from schelling_tools.runvault_io import (
+    artifacts_dir,
+    metrics_wide,
+    run_scope_metrics,
+    runvault_path,
+    sweep_summary_table,
+)
+
 # ---------------------------------------------------------------------------
 # 実験定義
 # ---------------------------------------------------------------------------
@@ -354,27 +362,29 @@ def run_cargo(args: list[str], cwd: Path) -> None:
     subprocess.run(args, cwd=cwd, check=True, stdout=subprocess.DEVNULL)
 
 
+def latest_run(output_dir: Path, subcommand: str, experiment: str = "schelling") -> Path:
+    """`--output-dir output_dir` で走らせた run のディレクトリを runvault に聞く．
+
+    出力は `<output_dir>/<experiment>/<run_slug>/` に落ちるので，ディレクトリの
+    並び方をこちら側で推測しない．
+    """
+    return Path(runvault_path(experiment, str(output_dir), subcommand=subcommand))
+
+
 def read_final_metrics(output_dir: Path) -> dict:
-    """cargo run が作成したタイムスタンプ付きサブディレクトリの metrics.csv を読む．"""
-    # output_dir 配下の一番新しい (タイムスタンプ名の) サブディレクトリを探す
-    candidates = sorted(
-        [p for p in output_dir.iterdir() if p.is_dir() and p.name != "latest"],
-        key=lambda p: p.stat().st_mtime,
-    )
-    if not candidates:
-        raise FileNotFoundError(f"metrics.csv が見つかりません: {output_dir}")
-    run_dir = candidates[-1]
+    """直前に走らせた run の metrics.csv から最終値を読む．"""
+    run_dir = latest_run(output_dir, "run")
     metrics_path = run_dir / "metrics.csv"
-    with metrics_path.open() as f:
-        reader = csv.DictReader(f)
-        rows = list(reader)
-    if not rows:
+    df = metrics_wide(metrics_path)
+    if df.empty:
         raise ValueError(f"空の metrics.csv: {metrics_path}")
-    final = rows[-1]
-    initial = rows[0]
+    final = df.iloc[-1]
+    initial = df.iloc[0]
+    scoped = run_scope_metrics(metrics_path)
     return {
         "run_dir": str(run_dir.relative_to(PROJECT_ROOT)),
-        "final_step": int(final["step"]),
+        "final_step": int(scoped.get("final_iteration", final["step"])),
+        "converged": bool(scoped.get("converged", 0.0)),
         "initial_avg_same_ratio": float(initial["avg_same_ratio"]),
         "avg_same_ratio": float(final["avg_same_ratio"]),
         "avg_same_ratio_a": float(final["avg_same_ratio_a"]),
@@ -474,17 +484,12 @@ def run_analytic_experiment(exp: AnalyticExperiment, base_dir: Path) -> dict:
         args += ["--init", f"{exp.init[0]},{exp.init[1]}"]
     run_cargo(args, cwd=PROJECT_ROOT)
 
-    # 出力を解析: results/{ts}_{model} ディレクトリを探す
-    candidates = sorted(
-        [p for p in exp_dir.iterdir() if p.is_dir() and p.name != "latest"],
-        key=lambda p: p.stat().st_mtime,
-    )
-    if not candidates:
-        raise FileNotFoundError(f"出力ディレクトリが見つかりません: {exp_dir}")
-    run_dir = candidates[-1]
+    # 出力を解析: 解析サブコマンドは experiment=schelling-analytic に落ちる
+    run_dir = latest_run(exp_dir, exp.model, experiment="schelling-analytic")
+    csv_dir = Path(artifacts_dir(run_dir))
 
     # equilibria.csv
-    eq_path = run_dir / "equilibria.csv"
+    eq_path = csv_dir / "equilibria.csv"
     equilibria = []
     if eq_path.exists():
         with eq_path.open() as f:
@@ -497,7 +502,7 @@ def run_analytic_experiment(exp: AnalyticExperiment, base_dir: Path) -> dict:
                 })
 
     # trajectory.csv (終点)
-    traj_path = run_dir / "trajectory.csv"
+    traj_path = csv_dir / "trajectory.csv"
     traj_final = None
     if traj_path.exists():
         with traj_path.open() as f:
@@ -512,7 +517,7 @@ def run_analytic_experiment(exp: AnalyticExperiment, base_dir: Path) -> dict:
             }
 
     # tipping_classification.json
-    cls_path = run_dir / "tipping_classification.json"
+    cls_path = csv_dir / "tipping_classification.json"
     classification = None
     if cls_path.exists():
         with cls_path.open() as f:
@@ -590,14 +595,10 @@ def run_tau_sweep(seeds: list[int], base_dir: Path) -> dict:
     ]
     run_cargo(args, cwd=PROJECT_ROOT)
 
-    # 生成された sweep_summary.csv を読む
-    sweep_outputs = sorted(
-        [p for p in sweep_dir.iterdir() if p.is_dir() and p.name.endswith("_sweep")],
-        key=lambda p: p.stat().st_mtime,
-    )
-    summary_path = sweep_outputs[-1] / "sweep_summary.csv"
-    with summary_path.open() as f:
-        rows = list(csv.DictReader(f))
+    # 1 行 1 条件の表は子 run から組み直す (sweep_summary.csv はもう書かれない)
+    parent_dir = latest_run(sweep_dir, "sweep")
+    summary = sweep_summary_table(parent_dir)
+    rows = summary.to_dict("records")
 
     # τごとに集計
     by_tau: dict[float, list[dict]] = {}
@@ -630,7 +631,7 @@ def run_tau_sweep(seeds: list[int], base_dir: Path) -> dict:
         "taus": taus,
         "seeds": seeds,
         "table": table,
-        "sweep_dir": str(sweep_outputs[-1].relative_to(PROJECT_ROOT)),
+        "sweep_dir": str(parent_dir.relative_to(PROJECT_ROOT)),
     }
 
 

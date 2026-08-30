@@ -74,11 +74,17 @@ results/paper_reproduction/{timestamp}/
 ├── reproduction_summary.csv        ← 表形式の per-seed 結果
 ├── reproduction_report.txt         ← コンソール出力と同じ比較レポート
 ├── fig11_tau_one_third/
-│   └── seed_{N}/{timestamp}/metrics.csv
+│   └── seed_{N}/schelling/run_{timestamp}_{cfg8}_{exec4}/metrics.csv
 ├── fig16_congregationist_min_same_3/
 │   └── ...
-└── fig14_tau_sweep/
-    └── {timestamp}_sweep/sweep_summary.csv
+├── fig14_tau_sweep/
+│   └── schelling/
+│       ├── sweep_{timestamp}_{cfg8}_{exec4}/   ← 親（グリッド定義）
+│       └── run_{timestamp}_{cfg8}_{exec4}/     ← 条件ごとの子
+└── fig18_bnm_linear/
+    └── schelling-analytic/bnm_{timestamp}_{cfg8}_{exec4}/artifacts/
 ```
+
+各実験の出力は runvault の run ディレクトリになり，`reproduce` はその場所を `runvault path --latest --subcommand ...` で解決します．τ 感度解析（Fig. 14）のサマリ表はファイルとしては存在せず，親 run に紐づく子 run から組み直されます．
 
 結果のメトリクスや図の読み方は [可視化 — 出力の解釈](visualization.ja.md#出力の解釈) を参照してください．

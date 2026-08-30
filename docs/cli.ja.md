@@ -96,22 +96,37 @@ cargo run --release -- run --n-a 97 --n-b 49 --threshold 0.333 --move-strategy b
 
 **出力ファイル:**
 
-各実行はタイムスタンプ付きサブディレクトリに保存されます．`results/latest` は最新の実行へのシンボリックリンクです．
+各実行は runvault の run ディレクトリとして保存されます．run ディレクトリが出力先そのものなので，タイムスタンプ付きの `latest` シンボリックリンクは作りません．直近の完了 run のパスは `runvault` に聞きます．
+
+```bash
+runvault path --experiment schelling --latest --subcommand run
+```
 
 ```
 results/
-├── latest -> 20260405_153000       ← 最新実行へのシンボリックリンク
-├── 20260405_153000/
-│   ├── metrics.csv                 ← ステップごとの分離度指標
-│   └── snapshots/
-│       ├── step_00000.csv          ← 初期状態
-│       ├── step_00001.csv
-│       └── ...
-└── 20260405_160000/
-    └── ...
+└── schelling/                                     ← experiment
+    ├── latest_finished -> run_20260405_153000_...  ← 最後に完了した run
+    ├── run_20260405_153000_9f2c41ab_3b1d/          ← <subcommand>_<時刻>_<cfg8>_<exec4>
+    │   ├── run.json                                ← メタデータ (git commit / 環境 / 論文情報)
+    │   ├── config.json                             ← 封筒．実験条件は ["parameters"] の下
+    │   ├── metrics.csv                             ← long 形式 (step / scope / name / value)
+    │   ├── status.json                             ← 終了状態と所要時間
+    │   ├── manifest.csv                            ← artifacts/ と logs/ のハッシュ
+    │   └── artifacts/
+    │       └── snapshots/
+    │           ├── step_00000.csv                  ← 初期状態
+    │           └── ...
+    ├── run_20260405_160000_.../
+    │   └── ...
+    └── figures/                                    ← 可視化スクリプトの出力 (run の外)
+        └── run_20260405_153000_9f2c41ab_3b1d/
+            ├── metrics_timeseries.png
+            └── ...
 ```
 
-`results/{timestamp}/` には `config.json` も生成されます．詳細は [`show-experiment-settings`](visualization.ja.md#show-experiment-settings) を参照．
+作図は run が終わった後に走るので，run ディレクトリの**外**（`<experiment>/figures/<run_slug>/`）に出します．`manifest.csv` は `finish()` が確定させるため，後から `artifacts/` に足したファイルにはハッシュが付きません．
+
+`metrics.csv` は 1 行 1 値の long 形式です．ステップごとの 7 指標は `step` を持ち，run 全体を 1 つの値で表す `converged` (0.0 / 1.0) と `final_iteration` は `scope=run` で `step` を持ちません．条件の表示は [`show-experiment-settings`](visualization.ja.md#show-experiment-settings) を参照．
 
 ## sweep（パラメータスイープ）
 
@@ -146,16 +161,21 @@ cargo run --release -- sweep --threshold 0.1:0.9:0.1 --rows 20 --cols 20
 
 **出力ファイル:**
 
+sweep は「親 run 1 本 + 条件ごとの子 run」として記録されます．子は親の下ではなく experiment ディレクトリの兄弟として並び，`lineage.parent_run_uid` で親を指します．1 行 1 条件のサマリ CSV は書きません（同じ値は各子 run の `metrics.csv` にあります）．
+
 ```
-results/{timestamp}_sweep/
-├── sweep_summary.csv                ← 全パラメータ組み合わせの最終メトリクス
-├── sweep_config.json                ← スイープ設定（再現用）
-├── tau_0.100_vac_0.300_seed_42/
-│   └── metrics.csv
-├── tau_0.200_vac_0.300_seed_42/
-│   └── metrics.csv
-└── ...
+results/
+└── schelling/
+    ├── sweep_20260405_160827_48d033b7_ee20/   ← 親．parameters がグリッド定義
+    │   ├── run.json                            ← lineage.sweep_id を持つ．rng.master_seed は null
+    │   └── config.json
+    ├── run_20260405_160828_174916dd_955d/     ← 子．lineage.parent_run_uid = 親の run_uid
+    │   ├── metrics.csv
+    │   └── artifacts/snapshots/
+    └── ...
 ```
+
+親のパスは `runvault path --experiment schelling --latest --subcommand sweep` で取れます．`schelling-tools visualize-sweep` はこの親を受け取り，子 run を集めて従来のサマリ表を組み直します．
 
 ## 解析モデル — 境界近隣モデル (BNM) とティッピングモデル
 

@@ -195,17 +195,6 @@ pub fn save_snapshot(world: &SchellingWorld, step: usize, dir: &str) {
     wtr.flush().expect("フラッシュに失敗");
 }
 
-/// メトリクス履歴をCSVに保存する
-pub fn save_metrics(metrics: &[Metrics], output_dir: &str) {
-    let path = format!("{}/metrics.csv", output_dir);
-    let file = File::create(&path).expect("メトリクスファイルの作成に失敗");
-    let mut wtr = Writer::from_writer(BufWriter::new(file));
-    for m in metrics {
-        wtr.serialize(m).expect("メトリクス書き込みに失敗");
-    }
-    wtr.flush().expect("フラッシュに失敗");
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

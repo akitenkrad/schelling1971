@@ -4,8 +4,13 @@ visualize_sweep.py — Schelling (1971) 分離モデル パラメータスイー
 
 Usage:
     uv run python analysis/visualize_sweep.py
-    uv run python analysis/visualize_sweep.py --sweep_dir results/20260405_160827_sweep
-    uv run python analysis/visualize_sweep.py --sweep_dir results/latest --output_dir out
+    uv run python analysis/visualize_sweep.py --sweep_dir results/schelling/sweep_...
+    uv run python analysis/visualize_sweep.py --output_dir out
+
+--sweep_dir を省略すると
+`runvault path --experiment schelling --latest --subcommand sweep`
+が返す sweep 親 run を対象にする (`runvault` が PATH にある必要がある)．
+1 行 1 条件の表はファイルとしては存在せず，親に紐づく子 run から組み直す．
 
 Outputs:
     output_dir/
@@ -22,7 +27,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import sys
 
 import matplotlib.animation as animation
 import matplotlib.patches as mpatches
@@ -30,6 +34,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from schelling_tools.runvault_io import (
+    config_parameters,
+    figures_dir,
+    legacy_run_dir_name as _run_dir_name,
+    runvault_path,
+    sweep_summary_table as load_summary,
+)
 from schelling_tools.visualize import (
     CMAP,
     COLOR_EMPTY,
@@ -80,7 +91,14 @@ def detect_sweep_type(df: pd.DataFrame) -> tuple[str, list[str]]:
 
 
 def load_sweep_config(sweep_dir: str) -> dict | None:
-    """sweep_config.json を読み込む（存在しなければ None）"""
+    """スイープのグリッド定義を読む．
+
+    runvault では sweep 親 run の `config.json` の `parameters`．legacy では
+    スイープディレクトリ直下の `sweep_config.json`．
+    """
+    params = config_parameters(sweep_dir)
+    if params is not None:
+        return params
     path = os.path.join(sweep_dir, "sweep_config.json")
     if os.path.exists(path):
         with open(path) as f:
@@ -444,9 +462,24 @@ def save_overview(
 # --------------------------------------------------------------------------- #
 
 
-def _run_dir_name(threshold: float, vacant_rate: float, seed: int) -> str:
-    """Rust 側 (cmd_sweep) と整合する run ディレクトリ名を生成する."""
-    return f"tau_{threshold:.3f}_vac_{vacant_rate:.3f}_seed_{seed}"
+def _snapshots_dir_for(
+    df: pd.DataFrame, threshold: float, vacant_rate: float, seed: int, sweep_dir: str,
+) -> str | None:
+    """(τ, vacant_rate, seed) に対応する子 run のスナップショット置き場を表から引く．
+
+    runvault の子 run はスイープ親の下ではなく兄弟として並び，名前もハッシュ付きの
+    slug なので，条件からディレクトリ名を composing することはできない．
+    """
+    if "snapshots_dir" in df.columns:
+        hit = df[
+            np.isclose(df["threshold"].astype(float), threshold)
+            & np.isclose(df["vacant_rate"].astype(float), vacant_rate)
+            & (df["seed"].astype(int) == int(seed))
+        ]
+        if not hit.empty:
+            return str(hit["snapshots_dir"].iloc[0])
+        return None
+    return os.path.join(sweep_dir, _run_dir_name(threshold, vacant_rate, seed), "snapshots")
 
 
 def _enumerate_combos(
@@ -527,16 +560,17 @@ def save_grid_animation(
     cell_snapshots: list[tuple[list[np.ndarray], list[int]] | None] = []
     missing: list[str] = []
     for vac, tau in combo_keys:
-        snap_dir = os.path.join(sweep_dir, _run_dir_name(tau, vac, seed), "snapshots")
-        if not os.path.isdir(snap_dir):
+        label = _run_dir_name(tau, vac, seed)
+        snap_dir = _snapshots_dir_for(df, tau, vac, seed, sweep_dir)
+        if snap_dir is None or not os.path.isdir(snap_dir):
             cell_snapshots.append(None)
-            missing.append(_run_dir_name(tau, vac, seed))
+            missing.append(label)
             continue
         try:
             matrices, steps = load_all_snapshots(snap_dir)
         except FileNotFoundError:
             cell_snapshots.append(None)
-            missing.append(_run_dir_name(tau, vac, seed))
+            missing.append(label)
             continue
         cell_snapshots.append((matrices, steps))
 
@@ -674,12 +708,20 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         description="Schelling 分離モデル パラメータスイープ 可視化スクリプト"
     )
     p.add_argument(
-        "--sweep_dir", "--sweep-dir", default="results/latest",
-        help="スイープ結果のディレクトリ (default: results/latest)",
+        "--sweep_dir", "--sweep-dir", default=None,
+        help="スイープの親 run ディレクトリ (省略時は runvault path --latest --subcommand sweep)",
+    )
+    p.add_argument(
+        "--results_root", "--results-root", default="results",
+        help="runvault の results ルート (default: results)",
+    )
+    p.add_argument(
+        "--experiment", default="schelling",
+        help="runvault の experiment 名 (default: schelling)",
     )
     p.add_argument(
         "--output_dir", "--output-dir", default=None,
-        help="図の保存先ディレクトリ (default: {sweep_dir}/figures)",
+        help="図の保存先ディレクトリ (default: <experiment>/figures/<run_slug>/)",
     )
     p.add_argument(
         "--no_grid_animation", "--no-grid-animation", action="store_true",
@@ -704,13 +746,11 @@ def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
 
     sweep_dir = args.sweep_dir
-    out_dir = args.output_dir if args.output_dir else os.path.join(sweep_dir, "figures")
+    if sweep_dir is None:
+        sweep_dir = runvault_path(args.experiment, args.results_root, subcommand="sweep")
 
-    summary_path = os.path.join(sweep_dir, "sweep_summary.csv")
-
-    if not os.path.exists(summary_path):
-        print(f"エラー: sweep_summary.csv が見つかりません: {summary_path}", file=sys.stderr)
-        sys.exit(1)
+    # 図は run が終わった後に作るものなので run ディレクトリの外に置く．
+    out_dir = args.output_dir or figures_dir(sweep_dir)
 
     os.makedirs(out_dir, exist_ok=True)
 
@@ -719,9 +759,9 @@ def main(argv: list[str] | None = None) -> None:
     print(f"出力先:       {out_dir}")
     print("---------------------------------------------------")
 
-    # データ読み込み
-    print("[1/6] sweep_summary.csv を読み込み中 ...")
-    df = pd.read_csv(summary_path)
+    # データ読み込み (runvault では子 run から組み直す)
+    print("[1/6] 各条件の最終値を集計中 ...")
+    df = load_summary(sweep_dir)
     print(f"      {len(df)} 行")
 
     # 設定読み込み

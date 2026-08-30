@@ -7,16 +7,19 @@
    論文報告値の参照範囲を表形式で表示する．`reproduce` 実行前のプレビュー用．
 
 2. 既存実行結果の設定表示 (`--results-dir <path>`)
-   results/{timestamp}/config.json (run) または
-   results/{timestamp}_sweep/sweep_config.json (sweep) を読み，
-   実行時に使われた全パラメータを表示する．`results/latest` も解決される．
+   runvault の run ディレクトリの config.json (封筒．条件は `parameters` の下) を読み，
+   実行時に使われた全パラメータを表示する．run か sweep かは run.json の subcommand で
+   判別する．legacy の flat な config.json / sweep_config.json も読める．
+
+   run ディレクトリのパスは次で取れる:
+       runvault path --experiment schelling --latest --subcommand run
+       runvault path --experiment schelling --latest --subcommand sweep
 
 Usage:
     schelling-tools show-experiment-settings
     schelling-tools show-experiment-settings --only fig11_tau_one_third
     schelling-tools show-experiment-settings --json
-    schelling-tools show-experiment-settings --results-dir results/latest
-    schelling-tools show-experiment-settings --results-dir results/20260425_153000
+    schelling-tools show-experiment-settings --results-dir "$(runvault path --experiment schelling --latest --subcommand run)"
 """
 
 from __future__ import annotations
@@ -28,6 +31,7 @@ import sys
 from dataclasses import asdict
 from pathlib import Path
 
+from schelling_tools.runvault_io import config_parameters, load_run_meta
 from schelling_tools.reproduce_paper import (
     PROJECT_ROOT,
     Experiment,
@@ -122,17 +126,32 @@ def _resolve_results_dir(arg: str) -> Path:
     return Path(os.path.realpath(p))
 
 
-def _find_config_file(results_dir: Path) -> tuple[Path, str]:
-    """results_dir 配下から config.json (run) か sweep_config.json (sweep) を探す．"""
-    run_cfg = results_dir / "config.json"
+def _load_config(results_dir: Path) -> tuple[dict, Path, str]:
+    """run ディレクトリの実験条件と，それが run のものか sweep のものかを返す．
+
+    runvault の run では config.json は封筒で，条件は `parameters` の下にある．
+    run か sweep かは run.json の `subcommand` が答える (`sweep_config.json` は
+    もう書かれない)．legacy の flat な config.json / sweep_config.json も読む．
+    """
+    params = config_parameters(results_dir)
+    if params is not None:
+        meta = load_run_meta(results_dir)
+        if meta is not None:
+            kind = "sweep" if meta.get("subcommand") == "sweep" else "run"
+        else:
+            # legacy: 自前で書いていた config.json は "command" を持つ
+            kind = "sweep" if params.get("command") == "sweep" else "run"
+        return params, results_dir / "config.json", kind
+
     sweep_cfg = results_dir / "sweep_config.json"
-    if run_cfg.exists():
-        return run_cfg, "run"
     if sweep_cfg.exists():
-        return sweep_cfg, "sweep"
+        with sweep_cfg.open() as f:
+            return json.load(f), sweep_cfg, "sweep"
+
     raise FileNotFoundError(
         f"設定ファイルが見つかりません: {results_dir}\n"
-        f"  期待されるファイル: config.json (run) または sweep_config.json (sweep)\n"
+        f"  期待されるファイル: config.json (runvault の封筒 / legacy の flat) "
+        f"または sweep_config.json (legacy の sweep)\n"
         f"  注: 旧バージョンで生成された結果には config.json が含まれていない場合があります．"
     )
 
@@ -159,7 +178,9 @@ def render_run_config(cfg: dict, source: Path) -> str:
     lines.append(f"シード       : {cfg.get('seed', '-')}")
     lines.append(f"最大反復     : {cfg.get('max_iterations', '-')}")
     lines.append(f"snapshot間隔 : {cfg.get('snapshot_interval', '-')}")
-    lines.append(f"出力先       : {cfg.get('output_dir', '-')}")
+    # 出力先は run ディレクトリそのものなので条件には含まれない (legacy のみ持つ)．
+    if cfg.get("output_dir") is not None:
+        lines.append(f"出力先       : {cfg['output_dir']}")
     lines.append("=" * 90)
     return "\n".join(lines)
 
@@ -202,7 +223,7 @@ def main(argv: list[str] | None = None) -> int:
         "--results-dir", "--results_dir",
         default=None,
         help=(
-            "実行結果ディレクトリを指定し，その config.json / sweep_config.json を表示する．"
+            "run ディレクトリを指定し，その config.json の実験条件を表示する．"
             "未指定時は論文再現実験定義の一覧を表示．"
         ),
     )
@@ -223,9 +244,7 @@ def main(argv: list[str] | None = None) -> int:
         if not results_dir.exists():
             print(f"エラー: ディレクトリが存在しません: {results_dir}", file=sys.stderr)
             return 1
-        cfg_path, kind = _find_config_file(results_dir)
-        with cfg_path.open() as f:
-            cfg = json.load(f)
+        cfg, cfg_path, kind = _load_config(results_dir)
         if args.json:
             payload = {"source": str(cfg_path), "kind": kind, "config": cfg}
             print(json.dumps(payload, indent=2, ensure_ascii=False))

@@ -3,18 +3,14 @@ mod config;
 mod grid;
 mod mechanisms;
 mod metrics;
+mod record;
 mod simulation;
 mod world;
 
-use std::fs::{self, File};
-use std::io::BufWriter;
-use std::path::Path;
-
-use chrono::Local;
 use clap::{Parser, Subcommand};
 use config::{Config, MoveMode, MoveStrategy, SatisfactionRule};
-use csv::Writer;
-use simulation::{run, save_metrics};
+use runvault::{Lineage, Run, RunOptions};
+use simulation::run as run_simulation;
 
 use analytic::dynamics::{DynamicsConfig, FlowModel};
 use analytic::phase::PhaseConfig;
@@ -617,25 +613,16 @@ fn parse_rule_string(s: &str) -> SatisfactionRule {
 }
 
 // ---------------------------------------------------------------------------
-// sweep_summary.csv の1行
+// sweep のコンソールサマリ 1 行 (ファイルには書かない)
 // ---------------------------------------------------------------------------
 
-#[derive(serde::Serialize)]
 struct SweepRow {
     threshold: f64,
     vacant_rate: f64,
-    rows: usize,
-    cols: usize,
     seed: u64,
     converged: bool,
     final_iteration: usize,
     avg_same_ratio: f64,
-    avg_same_ratio_a: f64,
-    avg_same_ratio_b: f64,
-    pct_no_opposite: f64,
-    dissimilarity_index: f64,
-    n_dissatisfied_final: usize,
-    n_moved_final: usize,
 }
 
 // ---------------------------------------------------------------------------
@@ -676,7 +663,6 @@ struct RunConfigJson {
     seed: Option<u64>,
     max_iterations: usize,
     snapshot_interval: usize,
-    output_dir: String,
 }
 
 fn run_config_json(cfg: &Config, vacant_rate: f64) -> RunConfigJson {
@@ -707,7 +693,6 @@ fn run_config_json(cfg: &Config, vacant_rate: f64) -> RunConfigJson {
         seed: cfg.seed,
         max_iterations: cfg.max_iterations,
         snapshot_interval: cfg.snapshot_interval,
-        output_dir: cfg.output_dir.clone(),
     }
 }
 
@@ -730,10 +715,6 @@ fn range_to_json(s: &str) -> serde_json::Value {
 // ---------------------------------------------------------------------------
 
 fn cmd_run(args: RunArgs) {
-    // タイムスタンプ付きサブディレクトリを生成
-    let timestamp = Local::now().format("%Y%m%d_%H%M%S").to_string();
-    let output_dir = format!("{}/{}", args.output_dir, timestamp);
-
     let total = args.rows * args.cols;
     let (n_a, n_b) = if args.n_a == 0 || args.n_b == 0 {
         let n_vacant = (total as f64 * args.vacant_rate).round() as usize;
@@ -765,7 +746,11 @@ fn cmd_run(args: RunArgs) {
         )
     });
 
-    let cfg = Config {
+    // シードを実体化してから記録する．--seed 省略時にシミュレーション側で
+    // rand::random に落とすと，実際に使われたシードがどこにも残らない．
+    let seed = args.seed.unwrap_or_else(rand::random::<u64>);
+
+    let mut cfg = Config {
         rows: args.rows,
         cols: args.cols,
         n_a,
@@ -774,10 +759,28 @@ fn cmd_run(args: RunArgs) {
         move_mode,
         move_strategy,
         max_iterations: args.max_iterations,
-        seed: args.seed,
+        seed: Some(seed),
         snapshot_interval: args.snapshot_interval,
-        output_dir: output_dir.clone(),
+        // Run::start が run ディレクトリを決めた後に確定する．
+        output_dir: String::new(),
     };
+
+    let parameters = run_config_json(&cfg, args.vacant_rate);
+    let mut rv = Run::start(
+        RunOptions::new("schelling", "run")
+            .repo_id("schelling1971")
+            .domain("simulation")
+            .results_root(&args.output_dir)
+            .parameters(&parameters)
+            .expect("runvault: parameters の組み立てに失敗")
+            .seed_pointers(["/seed"])
+            .master_seed(seed)
+            .replication(record::replication()),
+    )
+    .expect("runvault: run の開始に失敗");
+
+    // run ディレクトリが出力先そのものになる．snapshots は artifacts/ の下へ．
+    cfg.output_dir = rv.dir().join("artifacts").to_string_lossy().into_owned();
 
     println!("=== Schelling 分離モデル 再現実験 ===");
     println!(
@@ -791,33 +794,12 @@ fn cmd_run(args: RunArgs) {
         cfg.move_mode.label(),
         cfg.move_strategy.label(),
     );
-    println!("シード: {:?}", cfg.seed);
-    println!("出力先: {}", cfg.output_dir);
+    println!("シード: {}", seed);
+    println!("出力先: {}", rv.dir().display());
     println!("---------------------------------------");
 
-    let result = run(&cfg);
-    save_metrics(&result.metrics_history, &cfg.output_dir);
-
-    // config.json を保存
-    {
-        let path = format!("{}/config.json", cfg.output_dir);
-        let file = File::create(&path).expect("config.json の作成に失敗");
-        serde_json::to_writer_pretty(
-            BufWriter::new(file),
-            &run_config_json(&cfg, args.vacant_rate),
-        )
-        .expect("config.json の書き込みに失敗");
-    }
-
-    // latest シンボリックリンクを作成・更新
-    let symlink_path = Path::new(&args.output_dir).join("latest");
-    if symlink_path.is_symlink() {
-        let _ = fs::remove_file(&symlink_path);
-    }
-    #[cfg(unix)]
-    {
-        let _ = std::os::unix::fs::symlink(&timestamp, &symlink_path);
-    }
+    let result = run_simulation(&cfg);
+    record::log_simulation(&mut rv, &result);
 
     let last = result.metrics_history.last().unwrap();
     println!(
@@ -832,9 +814,11 @@ fn cmd_run(args: RunArgs) {
         last.avg_same_ratio_b * 100.0
     );
     println!("異色近隣なし割合: {:.1}%", last.pct_no_opposite);
-    println!("メトリクス → {}/metrics.csv", cfg.output_dir);
-    println!("設定       → {}/config.json", cfg.output_dir);
-    println!("スナップショット → {}/snapshots/", cfg.output_dir);
+
+    let dir = rv.finish().expect("runvault: run の完了に失敗");
+    println!("メトリクス → {}/metrics.csv", dir.display());
+    println!("設定       → {}/config.json", dir.display());
+    println!("スナップショット → {}/artifacts/snapshots/", dir.display());
 }
 
 // ---------------------------------------------------------------------------
@@ -849,31 +833,61 @@ fn cmd_sweep(args: SweepArgs) {
         .split(',')
         .map(|s| s.trim().parse::<u64>().expect("シードのパースに失敗"))
         .collect();
+    assert!(!seeds.is_empty(), "--seeds が空です");
 
     // 全組み合わせのカルテシアン積を構築
     struct Combo {
         threshold: f64,
         vacant_rate: f64,
         seed: u64,
+        replicate_index: u64,
     }
     let mut combos: Vec<Combo> = Vec::new();
     for &tau in &thresholds {
         for &vac in &vacant_rates {
-            for &seed in &seeds {
+            for (i, &seed) in seeds.iter().enumerate() {
                 combos.push(Combo {
                     threshold: tau,
                     vacant_rate: vac,
                     seed,
+                    replicate_index: i as u64,
                 });
             }
         }
     }
     let n_total = combos.len();
 
-    // タイムスタンプ付きsweepディレクトリを生成
-    let timestamp = Local::now().format("%Y%m%d_%H%M%S").to_string();
-    let sweep_dir = format!("{}/{}_sweep", args.output_dir, timestamp);
-    fs::create_dir_all(&sweep_dir).expect("sweepディレクトリの作成に失敗");
+    // 親 run: グリッド定義そのものを parameters に持つ．個別条件の指標は書かない．
+    let sweep_parameters = SweepConfigJson {
+        threshold: range_to_json(&args.threshold),
+        vacant_rate: range_to_json(&args.vacant_rate),
+        rows: args.rows,
+        cols: args.cols,
+        seeds: seeds.clone(),
+        max_iterations: args.max_iterations,
+        snapshot_interval: args.snapshot_interval,
+    };
+    // 親が持つのはシード「列」であって単一の master seed ではない．列は
+    // /parameters.seeds と seed_pointers 経由で execution_hash に残る．
+    // sweep_id は runvault が親の run_slug で埋める．
+    let parent = Run::start(
+        RunOptions::new("schelling", "sweep")
+            .repo_id("schelling1971")
+            .domain("simulation")
+            .results_root(&args.output_dir)
+            .parameters(&sweep_parameters)
+            .expect("runvault: sweep の parameters の組み立てに失敗")
+            .seed_pointers(["/seeds"])
+            .sweep_parent()
+            .replication(record::replication()),
+    )
+    .expect("runvault: sweep 親 run の開始に失敗");
+
+    let sweep_id = parent
+        .sweep_id()
+        .expect("runvault: sweep 親に sweep_id がありません")
+        .to_string();
+    let parent_run_uid = parent.run_uid().to_string();
 
     println!("=== Schelling 分離モデル パラメータスイープ ===");
     println!(
@@ -885,7 +899,7 @@ fn cmd_sweep(args: SweepArgs) {
         seeds.len(),
         n_total
     );
-    println!("出力先: {}", sweep_dir);
+    println!("出力先: {}", parent.dir().display());
     println!("-----------------------------------------------");
 
     let mut summary_rows: Vec<SweepRow> = Vec::with_capacity(n_total);
@@ -897,12 +911,7 @@ fn cmd_sweep(args: SweepArgs) {
         let n_a = n_agents / 2;
         let n_b = n_agents - n_a;
 
-        let run_dir = format!(
-            "{}/tau_{:.3}_vac_{:.3}_seed_{}",
-            sweep_dir, combo.threshold, combo.vacant_rate, combo.seed
-        );
-
-        let cfg = Config {
+        let mut cfg = Config {
             rows: args.rows,
             cols: args.cols,
             n_a,
@@ -915,11 +924,33 @@ fn cmd_sweep(args: SweepArgs) {
             max_iterations: args.max_iterations,
             seed: Some(combo.seed),
             snapshot_interval: args.snapshot_interval,
-            output_dir: run_dir.clone(),
+            output_dir: String::new(),
         };
 
-        let result = run(&cfg);
-        save_metrics(&result.metrics_history, &cfg.output_dir);
+        let parameters = run_config_json(&cfg, combo.vacant_rate);
+        let mut child = Run::start(
+            RunOptions::new("schelling", "run")
+                .repo_id("schelling1971")
+                .domain("simulation")
+                .results_root(&args.output_dir)
+                .parameters(&parameters)
+                .expect("runvault: 子 run の parameters の組み立てに失敗")
+                .seed_pointers(["/seed"])
+                .master_seed(combo.seed)
+                .replicate_index(combo.replicate_index)
+                .lineage(Lineage {
+                    sweep_id: Some(sweep_id.clone()),
+                    parent_run_uid: Some(parent_run_uid.clone()),
+                    ..Default::default()
+                })
+                .replication(record::replication()),
+        )
+        .expect("runvault: 子 run の開始に失敗");
+
+        cfg.output_dir = child.dir().join("artifacts").to_string_lossy().into_owned();
+
+        let result = run_simulation(&cfg);
+        record::log_simulation(&mut child, &result);
 
         let last = result.metrics_history.last().unwrap();
 
@@ -938,58 +969,13 @@ fn cmd_sweep(args: SweepArgs) {
         summary_rows.push(SweepRow {
             threshold: combo.threshold,
             vacant_rate: combo.vacant_rate,
-            rows: args.rows,
-            cols: args.cols,
             seed: combo.seed,
             converged: result.converged,
             final_iteration: result.final_iteration,
             avg_same_ratio: last.avg_same_ratio,
-            avg_same_ratio_a: last.avg_same_ratio_a,
-            avg_same_ratio_b: last.avg_same_ratio_b,
-            pct_no_opposite: last.pct_no_opposite,
-            dissimilarity_index: last.dissimilarity_index,
-            n_dissatisfied_final: last.n_dissatisfied,
-            n_moved_final: last.n_moved,
         });
-    }
 
-    // sweep_summary.csv を保存
-    {
-        let path = format!("{}/sweep_summary.csv", sweep_dir);
-        let file = File::create(&path).expect("sweep_summary.csv の作成に失敗");
-        let mut wtr = Writer::from_writer(BufWriter::new(file));
-        for row in &summary_rows {
-            wtr.serialize(row).expect("サマリ行の書き込みに失敗");
-        }
-        wtr.flush().expect("フラッシュに失敗");
-    }
-
-    // sweep_config.json を保存
-    {
-        let config_json = SweepConfigJson {
-            threshold: range_to_json(&args.threshold),
-            vacant_rate: range_to_json(&args.vacant_rate),
-            rows: args.rows,
-            cols: args.cols,
-            seeds: seeds.clone(),
-            max_iterations: args.max_iterations,
-            snapshot_interval: args.snapshot_interval,
-        };
-        let path = format!("{}/sweep_config.json", sweep_dir);
-        let file = File::create(&path).expect("sweep_config.json の作成に失敗");
-        serde_json::to_writer_pretty(BufWriter::new(file), &config_json)
-            .expect("sweep_config.json の書き込みに失敗");
-    }
-
-    // latest シンボリックリンクを作成・更新
-    let symlink_path = Path::new(&args.output_dir).join("latest");
-    if symlink_path.is_symlink() {
-        let _ = fs::remove_file(&symlink_path);
-    }
-    #[cfg(unix)]
-    {
-        let link_target = format!("{}_sweep", timestamp);
-        let _ = std::os::unix::fs::symlink(&link_target, &symlink_path);
+        child.finish().expect("runvault: 子 run の完了に失敗");
     }
 
     // サマリテーブルを表示
@@ -1012,9 +998,13 @@ fn cmd_sweep(args: SweepArgs) {
             row.avg_same_ratio,
         );
     }
+
+    let dir = parent
+        .finish()
+        .expect("runvault: sweep 親 run の完了に失敗");
     println!("-----------------------------------------------");
-    println!("サマリ → {}/sweep_summary.csv", sweep_dir);
-    println!("設定   → {}/sweep_config.json", sweep_dir);
+    println!("スイープ定義 → {}/config.json", dir.display());
+    println!("各条件の指標は子 run (subcommand=run) の metrics.csv にあります");
 }
 
 // ---------------------------------------------------------------------------

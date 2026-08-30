@@ -6,6 +6,10 @@ Usage:
     python analysis/visualize.py [--results_dir RESULTS_DIR] [--output_dir OUTPUT_DIR]
                                   [--fps FPS] [--no_animation]
 
+--results_dir を省略すると
+`runvault path --experiment schelling --latest --subcommand run`
+が返す run ディレクトリを対象にする (`runvault` が PATH にある必要がある)．
+
 Outputs:
     output_dir/
     ├── animation.gif          ← グリッド進化のアニメーション
@@ -28,6 +32,8 @@ import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+
+from schelling_tools.runvault_io import artifacts_dir, figures_dir, metrics_wide, runvault_path
 
 # --------------------------------------------------------------------------- #
 # 日本語フォント設定
@@ -54,6 +60,11 @@ LEGEND_PATCHES = [
 # --------------------------------------------------------------------------- #
 # ユーティリティ
 # --------------------------------------------------------------------------- #
+
+def snapshots_dir_of(results_dir: str) -> str:
+    """run ディレクトリからスナップショットの置き場を決める．"""
+    return os.path.join(artifacts_dir(results_dir), "snapshots")
+
 
 def load_snapshot(path: str, rows: int, cols: int) -> np.ndarray:
     """CSVスナップショットをグリッド行列 (rows×cols) に変換する"""
@@ -86,10 +97,8 @@ def load_all_snapshots(snapshots_dir: str) -> tuple[list[np.ndarray], list[int]]
 
 
 def load_metrics(metrics_path: str) -> pd.DataFrame:
-    """metrics.csv を読み込む"""
-    if not os.path.exists(metrics_path):
-        raise FileNotFoundError(f"metrics.csv が見つかりません: {metrics_path}")
-    return pd.read_csv(metrics_path)
+    """metrics.csv を 1 行 1 ステップの wide 形式で読み込む．"""
+    return metrics_wide(metrics_path)
 
 
 # --------------------------------------------------------------------------- #
@@ -345,12 +354,20 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         description="Schelling 分離モデル 可視化スクリプト"
     )
     p.add_argument(
-        "--results_dir", "--results-dir", default="results/latest",
-        help="Rustシミュレーションの出力ディレクトリ (default: results/latest)"
+        "--results_dir", "--results-dir", default=None,
+        help="run ディレクトリ (省略時は runvault path --latest --subcommand run)"
+    )
+    p.add_argument(
+        "--results_root", "--results-root", default="results",
+        help="runvault の results ルート (default: results)"
+    )
+    p.add_argument(
+        "--experiment", default="schelling",
+        help="runvault の experiment 名 (default: schelling)"
     )
     p.add_argument(
         "--output_dir", "--output-dir", default=None,
-        help="図の保存先ディレクトリ (default: {results_dir}/figures)"
+        help="図の保存先ディレクトリ (default: <experiment>/figures/<run_slug>/)"
     )
     p.add_argument(
         "--fps", type=int, default=5,
@@ -370,9 +387,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
 
-    snapshots_dir = os.path.join(args.results_dir, "snapshots")
-    metrics_path  = os.path.join(args.results_dir, "metrics.csv")
-    out_dir       = args.output_dir if args.output_dir else os.path.join(args.results_dir, "figures")
+    results_dir = args.results_dir
+    if results_dir is None:
+        results_dir = runvault_path(args.experiment, args.results_root, subcommand="run")
+
+    snapshots_dir = snapshots_dir_of(results_dir)
+    metrics_path  = os.path.join(results_dir, "metrics.csv")
+    # 図は run が終わった後に作るものなので run ディレクトリの外に置く
+    # (manifest.csv は finish() が確定させるので，後から足すと食い違う)．
+    out_dir       = args.output_dir or figures_dir(results_dir)
 
     os.makedirs(out_dir, exist_ok=True)
 

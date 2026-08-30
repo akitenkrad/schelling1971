@@ -18,13 +18,17 @@ uv run schelling-tools visualize --max_frames 30 --fps 8
 uv run schelling-tools visualize --no_animation
 
 # Visualize a specific run
-uv run schelling-tools visualize --results_dir results/20260405_153000
+uv run schelling-tools visualize --results_dir "$(runvault path --experiment schelling --latest --subcommand run)"
 ```
+
+Omitting `--results_dir` targets whatever `runvault path --experiment schelling --latest --subcommand run` returns (`runvault` must be on PATH). `--subcommand run` keeps it from picking up a sweep parent.
 
 **Output files (single run):**
 
+Figures go *outside* the run directory, in `<results_root>/<experiment>/figures/<run_slug>/`. `manifest.csv` is fixed by `finish()`, so adding something produced after the run to `artifacts/` would leave it unhashed and out of step with the record.
+
 ```
-results/latest/figures/
+<results_root>/<experiment>/figures/<run_slug>/
 ├── animation.gif          # animation of the grid evolution
 ├── initial_state.png      # grid at the initial state
 ├── final_state.png        # grid at the final state
@@ -34,22 +38,23 @@ results/latest/figures/
 
 ## Sweep visualization
 
-`schelling-tools visualize-sweep` reads the sweep result (`sweep_summary.csv`) and visualizes the relationship between parameters and final metrics. It automatically distinguishes 1D sweeps (one parameter varies) from 2D sweeps (two parameters vary).
+`schelling-tools visualize-sweep` takes a sweep's parent run, collects the child runs that point at it through `lineage.parent_run_uid`, rebuilds the one-row-per-condition table (no `sweep_summary.csv` is written any more) and visualizes the relationship between parameters and final metrics. It automatically distinguishes 1D sweeps (one parameter varies) from 2D sweeps (two parameters vary).
 
 ```bash
-# Visualize the most recent sweep result (via results/latest)
+# Visualize the most recent sweep (via runvault path --latest --subcommand sweep)
 uv run schelling-tools visualize-sweep
 
-# Specify a particular sweep result
-uv run schelling-tools visualize-sweep --sweep_dir results/20260405_161446_sweep
+# Specify a particular sweep
+uv run schelling-tools visualize-sweep --sweep_dir "$(runvault path --experiment schelling --latest --subcommand sweep)"
 ```
 
 **Main options:**
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--sweep_dir` | `results/latest` | Sweep result directory |
-| `--output_dir` | `{sweep_dir}/figures` | Where figures are saved |
+| `--sweep_dir` | `runvault path --latest --subcommand sweep` | The sweep's parent run directory |
+| `--results_root` | `results` | runvault results root |
+| `--output_dir` | `<experiment>/figures/<run_slug>/` | Where figures are saved |
 | `--no_grid_animation` | off | Skip generating the per-combination grid animation |
 | `--grid_seed` | first seed | Seed used for the grid animation |
 | `--fps` | 5 | FPS of the grid animation |
@@ -58,7 +63,7 @@ uv run schelling-tools visualize-sweep --sweep_dir results/20260405_161446_sweep
 **Output files (sweep):**
 
 ```
-results/latest/figures/
+<results_root>/<experiment>/figures/<sweep parent's run_slug>/
 ├── sweep_avg_same_ratio.png  # average same-color neighbor ratio (1D: line + error bars / 2D: heatmap)
 ├── sweep_pct_no_opposite.png # fraction with no opposite-color neighbors
 ├── sweep_convergence.png     # number of convergence steps
@@ -92,18 +97,18 @@ uv run schelling-tools show-experiment-settings
 # Show only specific experiment keys (comma-separated)
 uv run schelling-tools show-experiment-settings --only fig11_tau_one_third,fig16_congregationist_min_same_3
 
-# Show the settings of an existing result (references the latest via results/latest)
-uv run schelling-tools show-experiment-settings --results-dir results/latest
+# Show the settings of an existing result (the most recent run / sweep)
+uv run schelling-tools show-experiment-settings --results-dir "$(runvault path --experiment schelling --latest --subcommand run)"
 
 # Specify a particular result (run / sweep auto-detected)
 uv run schelling-tools show-experiment-settings --results-dir results/20260425_153000
 
 # Output in JSON format
 uv run schelling-tools show-experiment-settings --json
-uv run schelling-tools show-experiment-settings --results-dir results/latest --json
+uv run schelling-tools show-experiment-settings --results-dir <run directory> --json
 ```
 
-A `config.json` is generated under `results/{timestamp}/` for a `run`, and a `sweep_config.json` under `results/{timestamp}_sweep/` for a `sweep`. This command auto-detects and pretty-prints both.
+The condition lives under `parameters` in the run directory's `config.json` (runvault's envelope, which also carries `schema_version`, `run_uid` and `runvault`). Whether it was a `run` or a `sweep` is answered by `subcommand` in `run.json`, so either can be passed. Flat `config.json` / `sweep_config.json` files written before the runvault migration are still read.
 
 > **Note**: Result directories generated by older versions (before `config.json` output was supported) do not contain a settings file, so they cannot be displayed in `--results-dir` mode. In that case, please re-run.
 
@@ -124,7 +129,7 @@ A CSV file recording the segregation metrics at each step.
 | `n_dissatisfied` | Number of dissatisfied agents | 0– | Number of agents judged dissatisfied by the rule. Convergence when this is 0 |
 | `n_moved` | Number of agents that moved | 0– | Number of moves actually completed each step. Convergence when this is 0 |
 
-### Visualization output (results/latest/figures/)
+### Visualization output (`<experiment>/figures/<run_slug>/`)
 
 | File | Content | What to look at |
 |------|---------|-----------------|

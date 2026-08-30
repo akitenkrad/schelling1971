@@ -74,11 +74,17 @@ results/paper_reproduction/{timestamp}/
 ├── reproduction_summary.csv        # tabular per-seed results
 ├── reproduction_report.txt         # the same comparison report as the console output
 ├── fig11_tau_one_third/
-│   └── seed_{N}/{timestamp}/metrics.csv
+│   └── seed_{N}/schelling/run_{timestamp}_{cfg8}_{exec4}/metrics.csv
 ├── fig16_congregationist_min_same_3/
 │   └── ...
-└── fig14_tau_sweep/
-    └── {timestamp}_sweep/sweep_summary.csv
+├── fig14_tau_sweep/
+│   └── schelling/
+│       ├── sweep_{timestamp}_{cfg8}_{exec4}/   # parent (grid definition)
+│       └── run_{timestamp}_{cfg8}_{exec4}/     # one child per condition
+└── fig18_bnm_linear/
+    └── schelling-analytic/bnm_{timestamp}_{cfg8}_{exec4}/artifacts/
 ```
+
+Every experiment writes a runvault run directory, and `reproduce` locates them with `runvault path --latest --subcommand ...`. The τ-sensitivity summary table (Fig. 14) does not exist as a file; it is rebuilt from the child runs attached to the parent.
 
 For how to read the resulting metrics and figures, see [Visualization — output interpretation](visualization.md#output-interpretation).

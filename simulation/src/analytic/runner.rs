@@ -3,19 +3,17 @@
 //! `bnm` / `bnm-basin` サブコマンドの実装本体．許容スケジュール CSV，
 //! 反応曲線 CSV，平衡点 CSV，ベクトル場 CSV，軌跡 CSV，吸引域 CSV を生成する．
 
-use std::fs::{self, File};
+use std::fs;
+use std::fs::File;
 use std::io::BufWriter;
-use std::path::Path;
 
-use chrono::Local;
 use csv::Writer;
+use runvault::{Run, RunOptions};
 use serde::{Deserialize, Serialize};
 
 use super::dynamics::{basin_of_attraction, integrate, BasinSample, DynamicsConfig};
 use super::phase::{Equilibrium, EquilibriumKind, PhaseConfig, Stability, ViabilityRegion};
-use super::tipping::{
-    classify_tipping, FlowAsymmetry, Speculation, TippingClassification, TippingConfig, TippingType,
-};
+use super::tipping::{classify_tipping, FlowAsymmetry, Speculation, TippingConfig, TippingType};
 
 // ---------------------------------------------------------------------------
 // config.json (bnm 用)
@@ -28,7 +26,6 @@ pub struct BnmConfigJson {
     pub phase: PhaseConfig,
     pub dynamics: DynamicsConfig,
     pub init: Option<(f64, f64)>,
-    pub output_dir: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -39,7 +36,6 @@ pub struct BnmBasinConfigJson {
     pub dynamics: DynamicsConfig,
     pub n_w: usize,
     pub n_b: usize,
-    pub output_dir: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48,8 +44,6 @@ pub struct TippingConfigJson {
     pub preset: Option<String>,
     pub config: TippingConfig,
     pub init: (f64, f64),
-    pub classification: TippingClassification,
-    pub output_dir: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -147,22 +141,30 @@ fn write_json<T: Serialize>(path: &str, value: &T) {
     serde_json::to_writer_pretty(BufWriter::new(file), value).expect("JSON書き込み失敗");
 }
 
-fn make_output_dir(base: &str, suffix: &str) -> String {
-    let timestamp = Local::now().format("%Y%m%d_%H%M%S").to_string();
-    let dir = format!("{}/{}_{}", base, timestamp, suffix);
-    fs::create_dir_all(&dir).expect("出力ディレクトリ作成失敗");
+/// 解析サブコマンド用の run を開始し，`(run, artifacts ディレクトリ)` を返す．
+///
+/// これらは RNG を使わない決定的な解析計算なので `domain = "analysis"` とする．
+/// `simulation` を名乗ると master_seed が必須になり，存在しないシードを書くことになる．
+fn start_run<T: Serialize + ?Sized>(
+    subcommand: &'static str,
+    output_base: &str,
+    parameters: &T,
+) -> (Run, String) {
+    let run = Run::start(
+        RunOptions::new("schelling-analytic", subcommand)
+            .repo_id("schelling1971")
+            .domain("analysis")
+            .results_root(output_base)
+            .parameters(parameters)
+            .expect("runvault: parameters の組み立てに失敗")
+            .replication(crate::record::replication()),
+    )
+    .expect("runvault: run の開始に失敗");
 
-    // latest シンボリックリンクを更新
-    let symlink_path = Path::new(base).join("latest");
-    if symlink_path.is_symlink() {
-        let _ = fs::remove_file(&symlink_path);
-    }
-    #[cfg(unix)]
-    {
-        let link_target = format!("{}_{}", timestamp, suffix);
-        let _ = std::os::unix::fs::symlink(&link_target, &symlink_path);
-    }
-    dir
+    let artifacts = run.dir().join("artifacts");
+    fs::create_dir_all(&artifacts).expect("artifacts ディレクトリの作成に失敗");
+    let dir = artifacts.to_string_lossy().into_owned();
+    (run, dir)
 }
 
 /// 共通: スケジュール・反応曲線・平衡点・ベクトル場 CSV を出力する．
@@ -255,7 +257,14 @@ pub struct BnmRunArgs {
 }
 
 pub fn cmd_bnm(args: BnmRunArgs) {
-    let output_dir = make_output_dir(&args.output_base, "bnm");
+    let parameters = BnmConfigJson {
+        command: "bnm",
+        preset: args.preset_name.clone(),
+        phase: args.phase.clone(),
+        dynamics: args.dynamics,
+        init: Some(args.init),
+    };
+    let (run, output_dir) = start_run("bnm", &args.output_base, &parameters);
 
     println!("=== Schelling 境界近隣モデル ===");
     println!("プリセット: {:?}", args.preset_name);
@@ -266,7 +275,7 @@ pub fn cmd_bnm(args: BnmRunArgs) {
         args.phase.capacity
     );
     println!("初期値: W₀={}, B₀={}", args.init.0, args.init.1);
-    println!("出力先: {}", output_dir);
+    println!("出力先: {}", run.dir().display());
     println!("---------------------------------------");
 
     // 共通アーティファクト出力
@@ -284,17 +293,6 @@ pub fn cmd_bnm(args: BnmRunArgs) {
         })
         .collect();
     write_csv(&format!("{}/trajectory.csv", output_dir), &traj_rows);
-
-    // config.json
-    let config_json = BnmConfigJson {
-        command: "bnm",
-        preset: args.preset_name.clone(),
-        phase: args.phase.clone(),
-        dynamics: args.dynamics,
-        init: Some(args.init),
-        output_dir: output_dir.clone(),
-    };
-    write_json(&format!("{}/config.json", output_dir), &config_json);
 
     // サマリ表示
     println!(
@@ -332,7 +330,8 @@ pub fn cmd_bnm(args: BnmRunArgs) {
         "CSV → {}/{{tolerance,reaction_curve,equilibria,vector_field,trajectory}}.csv",
         output_dir
     );
-    println!("設定 → {}/config.json", output_dir);
+    let dir = run.finish().expect("runvault: run の完了に失敗");
+    println!("設定 → {}/config.json", dir.display());
 }
 
 // ---------------------------------------------------------------------------
@@ -369,12 +368,18 @@ fn tipping_type_label(t: TippingType) -> &'static str {
 }
 
 pub fn cmd_tipping(args: TippingRunArgs) {
-    let output_dir = make_output_dir(&args.output_base, "tipping");
+    let parameters = TippingConfigJson {
+        command: "tipping",
+        preset: args.preset_name.clone(),
+        config: args.tipping.clone(),
+        init: args.init,
+    };
+    let (run, output_dir) = start_run("tipping", &args.output_base, &parameters);
 
     println!("=== Schelling ティッピングモデル ===");
     println!("プリセット: {:?}", args.preset_name);
     println!("初期値: W₀={}, B₀={}", args.init.0, args.init.1);
-    println!("出力先: {}", output_dir);
+    println!("出力先: {}", run.dir().display());
     println!("---------------------------------------");
 
     // 共通アーティファクト出力
@@ -412,17 +417,6 @@ pub fn cmd_tipping(args: TippingRunArgs) {
         }),
     );
 
-    // config.json
-    let config_json = TippingConfigJson {
-        command: "tipping",
-        preset: args.preset_name.clone(),
-        config: args.tipping,
-        init: args.init,
-        classification,
-        output_dir: output_dir.clone(),
-    };
-    write_json(&format!("{}/config.json", output_dir), &config_json);
-
     let last = traj.history.last().unwrap();
     println!(
         "軌跡: {} ステップ | 収束: {} | 終点: ({:.2}, {:.2})",
@@ -438,7 +432,8 @@ pub fn cmd_tipping(args: TippingRunArgs) {
     );
     println!("CSV → {}/{{...,trajectory}}.csv", output_dir);
     println!("分類 → {}/tipping_classification.json", output_dir);
-    println!("設定 → {}/config.json", output_dir);
+    let dir = run.finish().expect("runvault: run の完了に失敗");
+    println!("設定 → {}/config.json", dir.display());
 }
 
 // 抑止のための公開
@@ -457,7 +452,15 @@ pub fn make_default_asymmetry() -> FlowAsymmetry {
 }
 
 pub fn cmd_bnm_basin(args: BnmBasinArgs) {
-    let output_dir = make_output_dir(&args.output_base, "bnm_basin");
+    let parameters = BnmBasinConfigJson {
+        command: "bnm-basin",
+        preset: args.preset_name.clone(),
+        phase: args.phase.clone(),
+        dynamics: args.dynamics,
+        n_w: args.n_w,
+        n_b: args.n_b,
+    };
+    let (run, output_dir) = start_run("bnm-basin", &args.output_base, &parameters);
 
     println!("=== Schelling 境界近隣モデル — 吸引域解析 ===");
     println!("プリセット: {:?}", args.preset_name);
@@ -467,7 +470,7 @@ pub fn cmd_bnm_basin(args: BnmBasinArgs) {
         args.n_b + 1,
         (args.n_w + 1) * (args.n_b + 1)
     );
-    println!("出力先: {}", output_dir);
+    println!("出力先: {}", run.dir().display());
     println!("---------------------------------------");
 
     let _eqs = dump_phase_artifacts(&args.phase, &output_dir);
@@ -491,17 +494,6 @@ pub fn cmd_bnm_basin(args: BnmBasinArgs) {
         .collect();
     write_csv(&format!("{}/basin.csv", output_dir), &basin_rows);
 
-    let config_json = BnmBasinConfigJson {
-        command: "bnm-basin",
-        preset: args.preset_name,
-        phase: args.phase,
-        dynamics: args.dynamics,
-        n_w: args.n_w,
-        n_b: args.n_b,
-        output_dir: output_dir.clone(),
-    };
-    write_json(&format!("{}/config.json", output_dir), &config_json);
-
     // 集計: 各収束先のサンプル数
     let mut counts = std::collections::HashMap::<String, usize>::new();
     for r in &basin_rows {
@@ -512,5 +504,6 @@ pub fn cmd_bnm_basin(args: BnmBasinArgs) {
         println!("  {} → {} 点", kind, n);
     }
     println!("CSV → {}/basin.csv", output_dir);
-    println!("設定 → {}/config.json", output_dir);
+    let dir = run.finish().expect("runvault: run の完了に失敗");
+    println!("設定 → {}/config.json", dir.display());
 }

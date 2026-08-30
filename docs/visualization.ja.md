@@ -18,13 +18,17 @@ uv run schelling-tools visualize --max_frames 30 --fps 8
 uv run schelling-tools visualize --no_animation
 
 # 特定の実行結果を可視化
-uv run schelling-tools visualize --results_dir results/20260405_153000
+uv run schelling-tools visualize --results_dir "$(runvault path --experiment schelling --latest --subcommand run)"
 ```
+
+`--results_dir` を省略すると `runvault path --experiment schelling --latest --subcommand run` が返す run を対象にします（`runvault` が PATH にある必要があります）．`--subcommand run` を付けているので，sweep の親を掴むことはありません．
 
 **出力ファイル（単一実行）:**
 
+図は run ディレクトリの**外**，`<results_root>/<experiment>/figures/<run_slug>/` に置かれます．`manifest.csv` は `finish()` が確定させるので，run が終わった後に作るものを `artifacts/` に足すとハッシュが付かず，記録と食い違うためです．
+
 ```
-results/latest/figures/
+<results_root>/<experiment>/figures/<run_slug>/
 ├── animation.gif          ← グリッド進化のアニメーション
 ├── initial_state.png      ← 初期状態のグリッド
 ├── final_state.png        ← 最終状態のグリッド
@@ -34,22 +38,23 @@ results/latest/figures/
 
 ## スイープ結果の可視化
 
-`schelling-tools visualize-sweep` はスイープ結果（`sweep_summary.csv`）を読み込み，パラメータと最終メトリクスの関係を可視化します．1Dスイープ（1パラメータのみ変化）と2Dスイープ（2パラメータが変化）を自動判別します．
+`schelling-tools visualize-sweep` はスイープの親 run を受け取り，`lineage.parent_run_uid` で親を指す子 run を集めて 1 行 1 条件の表を組み直し，パラメータと最終メトリクスの関係を可視化します（`sweep_summary.csv` はもう書かれません）．1Dスイープ（1パラメータのみ変化）と2Dスイープ（2パラメータが変化）を自動判別します．
 
 ```bash
-# 最新のスイープ結果を可視化（results/latest 経由）
+# 最新のスイープを可視化（runvault path --latest --subcommand sweep 経由）
 uv run schelling-tools visualize-sweep
 
-# 特定のスイープ結果を指定
-uv run schelling-tools visualize-sweep --sweep_dir results/20260405_161446_sweep
+# 特定のスイープを指定
+uv run schelling-tools visualize-sweep --sweep_dir "$(runvault path --experiment schelling --latest --subcommand sweep)"
 ```
 
 **主なオプション:**
 
 | オプション | デフォルト | 説明 |
 |-----------|-----------|------|
-| `--sweep_dir` | `results/latest` | スイープ結果ディレクトリ |
-| `--output_dir` | `{sweep_dir}/figures` | 図の保存先 |
+| `--sweep_dir` | `runvault path --latest --subcommand sweep` | スイープの親 run ディレクトリ |
+| `--results_root` | `results` | runvault の results ルート |
+| `--output_dir` | `<experiment>/figures/<run_slug>/` | 図の保存先 |
 | `--no_grid_animation` | off | パラメータ組み合わせ別グリッドアニメーションの生成をスキップ |
 | `--grid_seed` | 先頭シード | グリッドアニメーションで使用する seed |
 | `--fps` | 5 | グリッドアニメーションの FPS |
@@ -58,7 +63,7 @@ uv run schelling-tools visualize-sweep --sweep_dir results/20260405_161446_sweep
 **出力ファイル（スイープ）:**
 
 ```
-results/latest/figures/
+<results_root>/<experiment>/figures/<sweep 親の run_slug>/
 ├── sweep_avg_same_ratio.png  ← 平均同色近隣比率（1D: 折れ線+エラーバー / 2D: ヒートマップ）
 ├── sweep_pct_no_opposite.png ← 異色近隣なし割合
 ├── sweep_convergence.png     ← 収束ステップ数
@@ -92,26 +97,26 @@ uv run schelling-tools show-experiment-settings
 # 特定の実験キーのみ表示（カンマ区切り可）
 uv run schelling-tools show-experiment-settings --only fig11_tau_one_third,fig16_congregationist_min_same_3
 
-# 既存実行結果の設定を表示（results/latest 経由で最新を参照）
-uv run schelling-tools show-experiment-settings --results-dir results/latest
-
-# 特定の実行結果を指定（run / sweep どちらでも自動判別）
-uv run schelling-tools show-experiment-settings --results-dir results/20260425_153000
+# 既存実行結果の設定を表示（直近の run / sweep）
+uv run schelling-tools show-experiment-settings --results-dir "$(runvault path --experiment schelling --latest --subcommand run)"
+uv run schelling-tools show-experiment-settings --results-dir "$(runvault path --experiment schelling --latest --subcommand sweep)"
 
 # JSON 形式で出力
 uv run schelling-tools show-experiment-settings --json
-uv run schelling-tools show-experiment-settings --results-dir results/latest --json
+uv run schelling-tools show-experiment-settings --results-dir <run ディレクトリ> --json
 ```
 
-`run` 実行時は `results/{timestamp}/config.json` が，`sweep` 実行時は `results/{timestamp}_sweep/sweep_config.json` が自動生成されます．両者は本コマンドが自動判別して整形表示します．
+条件は run ディレクトリの `config.json` の `parameters` にあります（`config.json` は runvault の封筒で，`schema_version` / `run_uid` / `runvault` / `parameters` を持ちます）．run か sweep かは `run.json` の `subcommand` で判別するので，指定するのはどちらでも構いません．
 
-> **注**: 旧バージョン（`config.json` 出力対応前）で生成された結果ディレクトリには設定ファイルが含まれていないため，`--results-dir` モードでは表示できません．その場合は再実行してください．
+> **注**: runvault 移行前に生成された結果ディレクトリの flat な `config.json` / `sweep_config.json` もそのまま読めます．さらに古い（`config.json` 出力対応前の）結果には設定ファイルが無いため表示できません．
 
 ## 出力の解釈
 
 ### metrics.csv
 
 各ステップにおける分離度指標を記録したCSVファイルです．
+
+runvault の `metrics.csv` は 1 行 1 値の **long 形式**（`run_uid, step, step_unit, scope, name, value`）です．下表は `name` に現れる指標の一覧で，`schelling-tools` は読み込み時に 1 行 1 ステップの表へ pivot します．なお `converged`（0.0 / 1.0）と `final_iteration` は run 全体を 1 つの値で表す指標なので `scope=run` で書かれ，`step` を持ちません．
 
 | カラム | 説明 | 値の範囲 | 読み方 |
 |-------|------|---------|-------|
@@ -124,7 +129,7 @@ uv run schelling-tools show-experiment-settings --results-dir results/latest --j
 | `n_dissatisfied` | 不満足エージェント数 | 0〜 | ルール上不満足と判定されたエージェント数．0になると収束 |
 | `n_moved` | 移動したエージェント数 | 0〜 | 各ステップで実際に移動が成立した数．0になると収束 |
 
-### 可視化出力 (results/latest/figures/)
+### 可視化出力 (`<experiment>/figures/<run_slug>/`)
 
 | ファイル | 内容 | 見るポイント |
 |---------|------|------------|

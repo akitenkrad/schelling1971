@@ -4,6 +4,10 @@ visualize_tipping.py — Schelling (1971) ティッピングモデル可視化�
 
 BNM 可視化に加え，tipping_classification.json を読み込んで
 in-tipping/out-tipping の有無を図中に注釈表示する．
+
+--results_dir を省略すると
+`runvault path --experiment schelling-analytic --latest --subcommand tipping`
+が返す run を対象にする．
 """
 from __future__ import annotations
 
@@ -13,6 +17,7 @@ import os
 
 import matplotlib.pyplot as plt
 
+from schelling_tools.runvault_io import artifacts_dir, figures_dir
 from schelling_tools.visualize_bnm import (
     load_artifacts,
     plot_basin_of_attraction,
@@ -25,7 +30,7 @@ from schelling_tools.visualize_bnm import (
 
 
 def load_classification(results_dir: str) -> dict | None:
-    path = os.path.join(results_dir, "tipping_classification.json")
+    path = os.path.join(artifacts_dir(results_dir), "tipping_classification.json")
     if not os.path.exists(path):
         return None
     with open(path) as f:
@@ -62,12 +67,18 @@ def main(argv: list[str] | None = None) -> None:
         prog="schelling-tools visualize-tipping",
         description="ティッピングモデル可視化 (BNM 可視化 + 分類注釈)",
     )
-    parser.add_argument("--results_dir", default=None)
-    parser.add_argument("--output_dir", default=None)
+    parser.add_argument("--results_dir", default=None,
+                        help="tipping の run ディレクトリ (省略時は runvault path --latest --subcommand tipping)")
+    parser.add_argument("--results_root", "--results-root", default="results",
+                        help="runvault の results ルート (default: results)")
+    parser.add_argument("--output_dir", default=None,
+                        help="図の出力ディレクトリ (省略時は <experiment>/figures/<run_slug>/)")
     args = parser.parse_args(argv)
 
-    results_dir = resolve_results_dir(args.results_dir)
-    output_dir = args.output_dir or os.path.join(results_dir, "figures")
+    results_dir = resolve_results_dir(
+        args.results_dir, results_root=args.results_root, subcommand="tipping",
+    )
+    output_dir = args.output_dir or figures_dir(results_dir)
     os.makedirs(output_dir, exist_ok=True)
 
     print(f"[visualize-tipping] 入力: {results_dir}")
