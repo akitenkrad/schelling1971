@@ -31,13 +31,14 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from schelling_tools.runvault_io import (
+from runvault.read import (
     artifacts_dir,
     metrics_wide,
-    run_scope_metrics,
     runvault_path,
-    sweep_summary_table,
+    scope_metrics_from_csv,
 )
+
+from schelling_tools.sweep_summary import sweep_summary_table
 
 # ---------------------------------------------------------------------------
 # 実験定義
@@ -380,7 +381,7 @@ def read_final_metrics(output_dir: Path) -> dict:
         raise ValueError(f"空の metrics.csv: {metrics_path}")
     final = df.iloc[-1]
     initial = df.iloc[0]
-    scoped = run_scope_metrics(metrics_path)
+    scoped = scope_metrics_from_csv(metrics_path)
     return {
         "run_dir": str(run_dir.relative_to(PROJECT_ROOT)),
         "final_step": int(scoped.get("final_iteration", final["step"])),

@@ -34,11 +34,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from schelling_tools.runvault_io import (
-    config_parameters,
-    figures_dir,
+from runvault.read import config_parameters, figures_dir, runvault_path
+
+from schelling_tools.sweep_summary import (
     legacy_run_dir_name as _run_dir_name,
-    runvault_path,
     sweep_summary_table as load_summary,
 )
 from schelling_tools.visualize import (
@@ -96,7 +95,9 @@ def load_sweep_config(sweep_dir: str) -> dict | None:
     runvault では sweep 親 run の `config.json` の `parameters`．legacy では
     スイープディレクトリ直下の `sweep_config.json`．
     """
-    params = config_parameters(sweep_dir)
+    # legacy のスイープには config.json が無く sweep_config.json があるので，
+    # 欠落は失敗ではない．
+    params = config_parameters(sweep_dir, required=False)
     if params is not None:
         return params
     path = os.path.join(sweep_dir, "sweep_config.json")

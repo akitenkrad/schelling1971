@@ -17,7 +17,7 @@ import os
 
 import matplotlib.pyplot as plt
 
-from schelling_tools.runvault_io import artifacts_dir, figures_dir
+from runvault.read import artifacts_dir, figures_dir
 from schelling_tools.visualize_bnm import (
     load_artifacts,
     plot_basin_of_attraction,

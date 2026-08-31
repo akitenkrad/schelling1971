@@ -33,7 +33,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from schelling_tools.runvault_io import artifacts_dir, figures_dir, metrics_wide, runvault_path
+from runvault.read import artifacts_dir, figures_dir, metrics_wide, runvault_path
 
 # --------------------------------------------------------------------------- #
 # 日本語フォント設定

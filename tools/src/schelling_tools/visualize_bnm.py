@@ -37,7 +37,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from schelling_tools.runvault_io import artifacts_dir, config_parameters, figures_dir, runvault_path
+from runvault.read import artifacts_dir, config_parameters, figures_dir, runvault_path
 
 # 日本語フォント
 plt.rcParams["font.family"] = "Hiragino Sans"
@@ -89,7 +89,7 @@ def load_artifacts(results_dir: str) -> dict:
     `artifacts/` の下から読む．legacy の run はどちらも run 直下．
     """
     out: dict = {}
-    out["config"] = config_parameters(results_dir)
+    out["config"] = config_parameters(results_dir, required=False)
     out["phase"] = _extract_phase(out["config"])
     csv_dir = artifacts_dir(results_dir)
 

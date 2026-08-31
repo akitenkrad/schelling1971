@@ -31,7 +31,7 @@ import sys
 from dataclasses import asdict
 from pathlib import Path
 
-from schelling_tools.runvault_io import config_parameters, load_run_meta
+from runvault.read import config_parameters, load_run_meta
 from schelling_tools.reproduce_paper import (
     PROJECT_ROOT,
     Experiment,
@@ -133,9 +133,11 @@ def _load_config(results_dir: Path) -> tuple[dict, Path, str]:
     run か sweep かは run.json の `subcommand` が答える (`sweep_config.json` は
     もう書かれない)．legacy の flat な config.json / sweep_config.json も読む．
     """
-    params = config_parameters(results_dir)
+    # 設定が無いことは «まだ sweep_config.json の方かもしれない» という意味なので，
+    # ここでは欠落を失敗として扱わない (下で sweep_config.json を見る)．
+    params = config_parameters(results_dir, required=False)
     if params is not None:
-        meta = load_run_meta(results_dir)
+        meta = load_run_meta(results_dir, required=False)
         if meta is not None:
             kind = "sweep" if meta.get("subcommand") == "sweep" else "run"
         else:
