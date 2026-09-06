@@ -11,7 +11,9 @@ use csv::Writer;
 use runvault::{Run, RunOptions};
 use serde::{Deserialize, Serialize};
 
-use super::dynamics::{basin_of_attraction, integrate, BasinSample, DynamicsConfig};
+use super::dynamics::{
+    basin_of_attraction_observed, integrate_observed, BasinSample, DynamicsConfig,
+};
 use super::phase::{Equilibrium, EquilibriumKind, PhaseConfig, Stability, ViabilityRegion};
 use super::tipping::{classify_tipping, FlowAsymmetry, Speculation, TippingConfig, TippingType};
 
@@ -281,8 +283,13 @@ pub fn cmd_bnm(args: BnmRunArgs) {
     // 共通アーティファクト出力
     let eqs = dump_phase_artifacts(&args.phase, &output_dir);
 
-    // 軌跡を計算
-    let traj = integrate(&args.phase, &args.dynamics, args.init);
+    // 軌跡を計算．単位は積分の 1 ステップ — 唯一 `--max-steps` で伸びる仕事で，
+    // 前段の CSV 出力 (許容スケジュール 200 点・反応曲線 200 点・ベクトル場
+    // 20x20) はいずれも定数で，掃引しようがない．収束すると `--max-steps` の
+    // 手前で打ち切るので，上限を分母にせず無界ステージで数える．
+    let mut stage = run.unbounded_stage("steps");
+    let traj = integrate_observed(&args.phase, &args.dynamics, args.init, |_| stage.tick());
+    stage.close();
     let traj_rows: Vec<TrajectoryRow> = traj
         .history
         .iter()
@@ -394,8 +401,10 @@ pub fn cmd_tipping(args: TippingRunArgs) {
         classification.mixed_stable_exists,
     );
 
-    // 軌跡を計算
-    let traj = args.tipping.integrate(args.init);
+    // 軌跡を計算．単位は BNM と同じ積分の 1 ステップ (無界にする理由も同じ)．
+    let mut stage = run.unbounded_stage("steps");
+    let traj = args.tipping.integrate_observed(args.init, |_| stage.tick());
+    stage.close();
     let traj_rows: Vec<TrajectoryRow> = traj
         .history
         .iter()
@@ -475,8 +484,17 @@ pub fn cmd_bnm_basin(args: BnmBasinArgs) {
 
     let _eqs = dump_phase_artifacts(&args.phase, &output_dir);
 
+    // 単位は «初期条件 1 点» ．1 点あたりの積分は既定 `--max-steps 3000` で
+    // 1 ミリ秒に満たず，時間を動かすのは点数のほう (実測: 20x20 で 0.5 秒，
+    // 100x100 で 7.9 秒，200x200 で 23.6 秒)．格子は先に決まっていて，途中で
+    // 打ち切る条件も無いので，格子点の総数を分母にした有界ステージにする．
+    let total_points = (args.n_w + 1) * (args.n_b + 1);
+    let mut stage = run.stage("initial conditions", total_points);
     let basin: Vec<BasinSample> =
-        basin_of_attraction(&args.phase, &args.dynamics, args.n_w, args.n_b);
+        basin_of_attraction_observed(&args.phase, &args.dynamics, args.n_w, args.n_b, || {
+            stage.tick()
+        });
+    stage.close();
     let basin_rows: Vec<BasinRow> = basin
         .iter()
         .map(|s| BasinRow {

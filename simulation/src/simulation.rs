@@ -11,7 +11,7 @@ use socsim_grid::{Boundary, Grid, GridIndex};
 
 use crate::config::Config;
 use crate::grid::Cell;
-use crate::mechanisms::SchellingMoveMechanism;
+use crate::mechanisms::{no_observer, DecisionObserver, SchellingMoveMechanism};
 use crate::metrics::Metrics;
 use crate::world::SchellingWorld;
 
@@ -86,6 +86,15 @@ pub fn init_world(cfg: &Config, rng: &mut SimRng) -> (GridIndex, BTreeMap<AgentI
 /// を見てループを抜ける．ステップ結果(移動数・不満足数・収束)は
 /// [`Simulation::scratch`](socsim_engine::Simulation::scratch) 経由で受け取る．
 pub fn run(cfg: &Config) -> SimulationResult {
+    run_observed(cfg, no_observer())
+}
+
+/// [`run`] と同じシミュレーションを行い，メカニズムがエージェント 1 体の移動を
+/// 判断するたびに `on_decision` を 1 回呼ぶ．
+///
+/// 数える単位がステップではなく判断である理由は
+/// [`DecisionObserver`](crate::mechanisms::DecisionObserver) に書いてある．
+pub fn run_observed(cfg: &Config, on_decision: DecisionObserver) -> SimulationResult {
     // 出力ディレクトリの準備
     let snapshots_dir = format!("{}/snapshots", cfg.output_dir);
     fs::create_dir_all(&snapshots_dir).expect("スナップショットディレクトリの作成に失敗");
@@ -109,7 +118,7 @@ pub fn run(cfg: &Config) -> SimulationResult {
     let mut sim = SimulationBuilder::new(world)
         .scheduler(Box::new(RandomActivationScheduler))
         .seed(derive_seed(root, &[RNG_ENGINE]))
-        .add_mechanism(Box::new(SchellingMoveMechanism))
+        .add_mechanism(Box::new(SchellingMoveMechanism::new(on_decision)))
         .build();
 
     // メトリクス履歴

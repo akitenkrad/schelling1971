@@ -82,6 +82,20 @@ pub struct TrajectoryPoint {
 
 /// 初期値 $(W_0, B_0)$ から動学積分を行う．
 pub fn integrate(phase: &PhaseConfig, cfg: &DynamicsConfig, init: (f64, f64)) -> Trajectory {
+    integrate_observed(phase, cfg, init, |_| {})
+}
+
+/// [`integrate`] と同じ計算を行い，1 ステップごとに `on_step` を 1 回呼ぶ．
+///
+/// 引数はステップ番号 (0 始まり)．`--max-steps` は上限であって到達点ではない
+/// (収束すると `break` する) ので，これを分母にした有界ステージは «確信をもって
+/// 間違った» 残り時間を出す．呼び出し側は無界ステージで数えること．
+pub fn integrate_observed(
+    phase: &PhaseConfig,
+    cfg: &DynamicsConfig,
+    init: (f64, f64),
+    mut on_step: impl FnMut(usize),
+) -> Trajectory {
     let (mut w, mut b) = init;
     let w_max = phase.w_schedule.pop_max();
     let b_max = phase.b_schedule.pop_max();
@@ -119,6 +133,7 @@ pub fn integrate(phase: &PhaseConfig, cfg: &DynamicsConfig, init: (f64, f64)) ->
         b = b_next;
         t += dt;
         history.push(TrajectoryPoint { t, w, b });
+        on_step(step);
 
         if speed < cfg.convergence_tol {
             converged = true;
@@ -261,11 +276,30 @@ pub struct BasinSample {
     pub steps: usize,
 }
 
+// 観測なしの入口．テストが使う (バイナリクレートなので `cargo build` からは
+// 使われていないように見える)．
+#[allow(dead_code)]
 pub fn basin_of_attraction(
     phase: &PhaseConfig,
     cfg: &DynamicsConfig,
     n_w: usize,
     n_b: usize,
+) -> Vec<BasinSample> {
+    basin_of_attraction_observed(phase, cfg, n_w, n_b, || {})
+}
+
+/// [`basin_of_attraction`] と同じ計算を行い，初期条件 1 点ごとに `on_sample` を
+/// 1 回呼ぶ．
+///
+/// 容量制約の外にあって積分しなかった点でも呼ぶ — 数えているのは «試した条件»
+/// であり，格子点の総数 `(n_w + 1) * (n_b + 1)` を分母にした有界ステージが
+/// ちょうど 100% で閉じるのはそのためである．
+pub fn basin_of_attraction_observed(
+    phase: &PhaseConfig,
+    cfg: &DynamicsConfig,
+    n_w: usize,
+    n_b: usize,
+    mut on_sample: impl FnMut(),
 ) -> Vec<BasinSample> {
     let w_max = phase.w_schedule.pop_max();
     let b_max = phase.b_schedule.pop_max();
@@ -274,24 +308,25 @@ pub fn basin_of_attraction(
         for j in 0..=n_b {
             let w0 = w_max * (i as f64) / (n_w as f64);
             let b0 = b_max * (j as f64) / (n_b as f64);
-            if !phase.within_capacity(w0, b0) {
-                continue;
+            // `continue` で観測を飛ばさないよう，棄却は if の中に閉じ込める．
+            if phase.within_capacity(w0, b0) {
+                let traj = integrate(phase, cfg, (w0, b0));
+                let last = traj.history.last().copied().unwrap_or(TrajectoryPoint {
+                    t: 0.0,
+                    w: w0,
+                    b: b0,
+                });
+                out.push(BasinSample {
+                    w0,
+                    b0,
+                    final_w: last.w,
+                    final_b: last.b,
+                    converged: traj.converged,
+                    converged_kind: traj.final_equilibrium.map(|e| e.kind),
+                    steps: traj.converged_step.unwrap_or(cfg.max_steps),
+                });
             }
-            let traj = integrate(phase, cfg, (w0, b0));
-            let last = traj.history.last().copied().unwrap_or(TrajectoryPoint {
-                t: 0.0,
-                w: w0,
-                b: b0,
-            });
-            out.push(BasinSample {
-                w0,
-                b0,
-                final_w: last.w,
-                final_b: last.b,
-                converged: traj.converged,
-                converged_kind: traj.final_equilibrium.map(|e| e.kind),
-                steps: traj.converged_step.unwrap_or(cfg.max_steps),
-            });
+            on_sample();
         }
     }
     out

@@ -7,10 +7,14 @@ mod record;
 mod simulation;
 mod world;
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use clap::{Parser, Subcommand};
 use config::{Config, MoveMode, MoveStrategy, SatisfactionRule};
-use runvault::{Lineage, Run, RunOptions};
-use simulation::run as run_simulation;
+use mechanisms::DecisionObserver;
+use runvault::{Lineage, Run, RunOptions, Stage};
+use simulation::{run as run_simulation, run_observed as run_simulation_observed};
 
 use analytic::dynamics::{DynamicsConfig, FlowModel};
 use analytic::phase::PhaseConfig;
@@ -714,6 +718,35 @@ fn range_to_json(s: &str) -> serde_json::Value {
 // run サブコマンド（既存の単一実行ロジック）
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// stage の共有 (メカニズムは `'static` なので Stage を借用できない)
+// ---------------------------------------------------------------------------
+
+/// `Stage` をメカニズムと共有できる形に包み，観測子と «取り出し口» を返す．
+/// 閉じるときは [`close_shared`] で取り出す．
+fn share_stage(stage: Stage) -> (Rc<RefCell<Option<Stage>>>, DecisionObserver) {
+    let cell = Rc::new(RefCell::new(Some(stage)));
+    let observer: DecisionObserver = {
+        let cell = Rc::clone(&cell);
+        Rc::new(RefCell::new(move || {
+            if let Some(stage) = cell.borrow_mut().as_mut() {
+                stage.tick();
+            }
+        }))
+    };
+    (cell, observer)
+}
+
+/// 共有していた stage を取り出して閉じる．
+///
+/// manifest.csv は `finish()` で封をされる．その後に 1 行足せば，manifest が
+/// 食い違うダイジェストを持つことになる．
+fn close_shared(cell: &Rc<RefCell<Option<Stage>>>) {
+    if let Some(stage) = cell.borrow_mut().take() {
+        stage.close();
+    }
+}
+
 fn cmd_run(args: RunArgs) {
     let total = args.rows * args.cols;
     let (n_a, n_b) = if args.n_a == 0 || args.n_b == 0 {
@@ -798,7 +831,17 @@ fn cmd_run(args: RunArgs) {
     println!("出力先: {}", rv.dir().display());
     println!("---------------------------------------");
 
-    let result = run_simulation(&cfg);
+    // 単位は «エージェント 1 体の移動判断» ．ステップではない — 400x400 の
+    // 1 実行は 70.6 秒で収束まで 8 ステップ (1 ステップ 8.8 秒)，600x600 は
+    // 470 秒で 9 ステップ (1 ステップ 52 秒) と，ステップ単位では 30 秒の
+    // 報告間隔をまたいで数字が動かなくなる (実測)．
+    //
+    // 無界にするのは，メカニズムが収束・行き詰まりで `request_stop` を出して
+    // 打ち切るため — `--max-iterations` は到達しない上限であって，判断の総数は
+    // 走らせる前に数えられない．
+    let (stage, observer) = share_stage(rv.unbounded_stage("decisions"));
+    let result = run_simulation_observed(&cfg, observer);
+    close_shared(&stage);
     record::log_simulation(&mut rv, &result);
 
     let last = result.metrics_history.last().unwrap();
@@ -904,6 +947,15 @@ fn cmd_sweep(args: SweepArgs) {
 
     let mut summary_rows: Vec<SweepRow> = Vec::with_capacity(n_total);
 
+    // 単位は «1 条件 (τ × 空き地率 × シード) の試行» ．試行の長さは収束や
+    // 行き詰まりで打ち切られて一定しないが，**試行の本数は最初から厳密に
+    // 決まっている** ので有界ステージにできる (分母はレンジを割ったのではなく
+    // `combos` を組み立てた結果そのもの)．1 試行の中でさらにステップを数えな
+    // いのは，掃引で伸びるのは条件数であって 1 試行の長さではないため
+    // (13x16・500 反復の 1 試行は数ミリ秒．実測: 50x50 で τ13 値 × 空き地率
+    // 10 値 × 5 シード = 650 試行が 92 秒)．
+    let mut stage = parent.stage("trials", n_total);
+
     for (i, combo) in combos.iter().enumerate() {
         let total = args.rows * args.cols;
         let n_vacant = (total as f64 * combo.vacant_rate).round() as usize;
@@ -976,7 +1028,9 @@ fn cmd_sweep(args: SweepArgs) {
         });
 
         child.finish().expect("runvault: 子 run の完了に失敗");
+        stage.tick();
     }
+    stage.close();
 
     // サマリテーブルを表示
     println!("===============================================");

@@ -9,7 +9,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::dynamics::{integrate, DynamicsConfig, FlowModel, Trajectory, TrajectoryPoint};
+use super::dynamics::{integrate_observed, DynamicsConfig, FlowModel, Trajectory, TrajectoryPoint};
 use super::phase::{EquilibriumKind, PhaseConfig};
 use super::reaction::ReactionCurve;
 
@@ -73,7 +73,20 @@ pub struct TippingConfig {
 
 impl TippingConfig {
     /// 軌跡を積分する．投機項と非対称性は dynamics::integrate ではなく専用ルーチンで処理．
+    ///
+    /// 観測なしの入口．テストが使う (バイナリクレートなので `cargo build` からは
+    /// 使われていないように見える)．
+    #[allow(dead_code)]
     pub fn integrate(&self, init: (f64, f64)) -> Trajectory {
+        self.integrate_observed(init, |_| {})
+    }
+
+    /// [`TippingConfig::integrate`] と同じ計算を行い，1 ステップごとに `on_step`
+    /// を 1 回呼ぶ．引数はステップ番号 (0 始まり)．
+    ///
+    /// 拡張なし (投機なし・非対称なし) の経路も BNM の
+    /// [`integrate_observed`] に委ねるので，どちらの経路でも同じ粒度で数える．
+    pub fn integrate_observed(&self, init: (f64, f64), on_step: impl FnMut(usize)) -> Trajectory {
         // 現状: 投機・非対称が未指定なら BNM の積分にフォールバック．
         // 容量制約は channeling 適用後の値を使う．
         let mut phase = self.phase.clone();
@@ -84,12 +97,17 @@ impl TippingConfig {
         }
 
         match (self.speculation, self.asymmetry) {
-            (Speculation::None, None) => integrate(&phase, &self.dynamics, init),
-            _ => self.integrate_with_extensions(&phase, init),
+            (Speculation::None, None) => integrate_observed(&phase, &self.dynamics, init, on_step),
+            _ => self.integrate_with_extensions(&phase, init, on_step),
         }
     }
 
-    fn integrate_with_extensions(&self, phase: &PhaseConfig, init: (f64, f64)) -> Trajectory {
+    fn integrate_with_extensions(
+        &self,
+        phase: &PhaseConfig,
+        init: (f64, f64),
+        mut on_step: impl FnMut(usize),
+    ) -> Trajectory {
         let (mut w, mut b) = init;
         let w_max = phase.w_schedule.pop_max();
         let b_max = phase.b_schedule.pop_max();
@@ -163,6 +181,7 @@ impl TippingConfig {
             b = b_next;
             t += dt;
             history.push(TrajectoryPoint { t, w, b });
+            on_step(step);
 
             if speed < self.dynamics.convergence_tol {
                 converged = true;

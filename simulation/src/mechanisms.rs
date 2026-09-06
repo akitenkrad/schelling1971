@@ -25,15 +25,45 @@
 //! 経由で読み取る．収束(開始時不満足が空)または行き詰まり(`n_moved == 0`)を検知
 //! したら [`StepContext::request_stop`] でエンジンに停止を要求する．
 
+use std::cell::RefCell;
 use std::collections::HashSet;
+use std::rc::Rc;
 
 use socsim_core::{AgentId, Mechanism, Phase, Result, StepContext};
 
 use crate::config::MoveMode;
 use crate::world::SchellingWorld;
 
+/// エージェント 1 体の移動判断ごとに 1 回呼ばれる観測子．
+///
+/// 時間が入っているのはステップではなく **1 体の移動判断** である．不満足な
+/// エージェントは空きセルをチェビシェフ距離の昇順に走査するので，1 判断の費用は
+/// グリッドの広さに比例して伸びる．実測: 400x400 の `run` は 70.6 秒で，収束まで
+/// わずか 8 ステップ (1 ステップ 8.8 秒)．600x600 は 20 分を超えても終わらず，
+/// 1 ステップが分の単位に入る．ステップ単位で数えると，その間ずっと数字が
+/// 動かない．
+///
+/// 借用ではなく共有にしてあるのは，メカニズムが `Box<dyn Mechanism<_>>` として
+/// エンジンに入る (= `'static`) ため，呼び出し側の `Stage` を借用できないから．
+pub type DecisionObserver = Rc<RefCell<dyn FnMut()>>;
+
+/// 何も数えない観測子 (進捗を報告しない呼び出し側用)．
+pub fn no_observer() -> DecisionObserver {
+    Rc::new(RefCell::new(|| {}))
+}
+
 /// 不満足エージェントを最近傍の満足できる空きセルへ移動させるメカニズム．
-pub struct SchellingMoveMechanism;
+pub struct SchellingMoveMechanism {
+    /// 移動判断 1 件ごとに呼ぶ観測子．
+    on_decision: DecisionObserver,
+}
+
+impl SchellingMoveMechanism {
+    /// 観測子つきで組み立てる．進捗を報告しない場合は [`no_observer`] を渡す．
+    pub fn new(on_decision: DecisionObserver) -> Self {
+        Self { on_decision }
+    }
+}
 
 impl Mechanism<SchellingWorld> for SchellingMoveMechanism {
     fn name(&self) -> &str {
@@ -66,6 +96,10 @@ impl Mechanism<SchellingWorld> for SchellingMoveMechanism {
         let mut n_moved = 0usize;
 
         for id in ctx.agent_order {
+            // 走査した 1 体を «判断 1 件» として先に数える．以降の `continue` が
+            // 観測を飛ばさないよう，ループ本体の先頭に置く．
+            (self.on_decision.borrow_mut())();
+
             // 開始時に満足していたエージェントは当該ステップでは動かさない．
             if !dissatisfied.contains(id) {
                 continue;
@@ -99,6 +133,10 @@ impl Mechanism<SchellingWorld> for SchellingMoveMechanism {
         let mut n_speculative = 0usize;
         if ctx.world.move_mode == MoveMode::Strict {
             for id in ctx.agent_order {
+                // 投機の走査も同じく 1 体 1 件として数える (厳格運用では 1 ステップ
+                // あたりの判断数が緩運用のおよそ 2 倍になる)．
+                (self.on_decision.borrow_mut())();
+
                 // 開始時に不満足だったエージェントは投機対象外(既に上で処理済み)．
                 if dissatisfied.contains(id) {
                     continue;
