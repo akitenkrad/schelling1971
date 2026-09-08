@@ -68,3 +68,72 @@ meaning   = "停止したときのステップ数"
 unit      = "count"
 direction = "none"
 scope     = ["run"]
+
+# --- 条件（parameters）の説明 -----------------------------------------------
+#
+# 鍵は JSON ポインタ．`config.json` の `/parameters` からの相対で指す．
+
+[parameters."/rows"]
+meaning = "格子の行数"
+unit    = "count"
+
+[parameters."/cols"]
+meaning = "格子の列数"
+unit    = "count"
+
+[parameters."/n_a"]
+meaning = "群 A のエージェント数（0 を渡すと格子と空き地率から自動で決まる）"
+unit    = "count"
+
+[parameters."/n_b"]
+meaning = "群 B のエージェント数"
+unit    = "count"
+
+[parameters."/n_vacant"]
+meaning = "空きセルの数．移動先はここからしか選べないので，分居がどこまで進むかを左右する"
+unit    = "count"
+
+[parameters."/vacant_rate"]
+meaning = "空き地率．n_a / n_b を自動で決めるときの入力"
+range   = [0.0, 1.0]
+
+[parameters."/threshold"]
+meaning = "許容限界 τ．同色近傍がこの比率を下回ると不満になる（`--rule` を省いたときの ratio ルールの入力）"
+range   = [0.0, 1.0]
+
+[parameters."/rule"]
+meaning = "満足判定ルール．`ratio:X`（分離型）/ `min-same:N`（集会型，Fig.16）/ `bounded:L:H`（統合型，Fig.17）"
+
+[parameters."/rule_kind"]
+meaning = "上のルールの種別だけを取り出したもの（`ratio` / `min-same` / `bounded`）"
+
+[parameters."/min_same"]
+meaning = "集会型ルールの下限 N．他のルールでは意味を持たないので null"
+unit    = "count"
+
+[parameters."/max_same"]
+meaning = "統合型ルールの上限．他のルールでは null"
+unit    = "count"
+
+[parameters."/move_mode"]
+meaning = "移動の運用．`standard` は不満足者だけが動く緩運用，`strict` は満足者も同色比率を厳密に改善できる空きへ投機的に動く（Fig.8）"
+
+[parameters."/move_strategy"]
+meaning = "移動先の選び方．`nearest` は最近傍で最初に満足できる空き，`best-local` は最近傍の距離帯で移動後の同色比率が最大の空き（不等数 Fig.12 の少数派クラスタ比率を改善する）"
+
+[parameters."/max_iterations"]
+meaning = "反復の上限．収束していなくてもここで止める"
+unit    = "count"
+
+[parameters."/snapshot_interval"]
+meaning = "格子のスナップショットを何ステップごとに残すか（0 で残さない）．結果ではなく記録の量を決める"
+unit    = "count"
+
+[parameters."/seed"]
+meaning = "乱数種．無作為なのは初期配置と活性化順だけで，移動先の選択に乱数は使わない"
+
+[parameters."/command"]
+meaning = "どのサブコマンドが書いた条件か"
+
+[parameters."/seeds"]
+meaning = "sweep が回すシードの並び．親はこの列で駆動されるので単一の乱数種を持たない"
