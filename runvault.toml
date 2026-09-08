@@ -1,0 +1,70 @@
+# 指標が何を測っているか (runvault の宣言．rs-runvault docs/metrics.ja.md)．
+#
+# `Run::start` がこのファイルを読み，`finish()` が «その run が実際に記録した名前に
+# 当たる分だけ» を run の `metrics.meta.json` へ写す．名前は `simulation/src/record.rs`
+# が書いているものと一致していなければならない．
+#
+# `direction` は «どちらが良いか» であって «どちらが大きいか» ではない．分居の強さは
+# 模型の記述であって成績ではないので `none` を書く — Schelling の主張は «穏やかな選好
+# でも分居が生じる» であり，分居が望ましいとは言っていない．「誰も決めていない」
+# (欄を書かない) と区別するために，決めた結果としての `none` を明示する．
+
+[metrics."avg_same_ratio"]
+meaning   = "全エージェントの同色近傍率の平均．無作為配置では群比 (≈0.5) 付近で，収束時は 0.6〜0.9 に達する"
+unit      = "ratio"
+direction = "none"
+range     = [0.0, 1.0]
+scope     = ["run"]
+
+[metrics."avg_same_ratio_a"]
+meaning   = "群 A に限った同色近傍率の平均．群間で分居の強さが非対称かを見る"
+unit      = "ratio"
+direction = "none"
+range     = [0.0, 1.0]
+scope     = ["run"]
+
+[metrics."avg_same_ratio_b"]
+meaning   = "群 B に限った同色近傍率の平均"
+unit      = "ratio"
+direction = "none"
+range     = [0.0, 1.0]
+scope     = ["run"]
+
+[metrics."pct_no_opposite"]
+meaning   = "異色の近傍を 1 体も持たないエージェントの割合．同色だけに囲まれた塊がどれだけできたかを表す"
+unit      = "percent"
+direction = "none"
+range     = [0.0, 100.0]
+scope     = ["run"]
+
+[metrics."dissimilarity_index"]
+meaning   = "非類似度指数 D (簡約版)．格子全体を 1 区画として D = 0.5 × |a/A − b/B|．群の大きさが等しければ ≈0"
+unit      = "ratio"
+direction = "none"
+range     = [0.0, 0.5]
+scope     = ["run"]
+
+[metrics."n_dissatisfied"]
+meaning   = "ステップ開始時に不満と判定されたエージェントの数．0 になった時点が収束である"
+unit      = "count"
+direction = "none"
+scope     = ["run"]
+
+[metrics."n_moved"]
+meaning   = "そのステップで実際に移動したエージェントの数．移動先が見つからず 0 になると停止する"
+unit      = "count"
+direction = "none"
+scope     = ["run"]
+
+[metrics."converged"]
+meaning   = "収束して終わったなら 1，打ち切りなら 0．不満者が 0 になることが収束の定義"
+unit      = "boolean"
+direction = "none"
+range     = [0.0, 1.0]
+scope     = ["run"]
+
+[metrics."final_iteration"]
+meaning   = "停止したときのステップ数"
+unit      = "count"
+direction = "none"
+scope     = ["run"]
