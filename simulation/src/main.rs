@@ -36,6 +36,9 @@ use analytic::tolerance::ToleranceSchedule;
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
+    /// Development run: write it under results/_scratch/ so it is never synced to the vault.
+    #[arg(long, global = true)]
+    scratch: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -401,7 +404,7 @@ fn build_bnm_inputs(
 // BNM サブコマンド本体
 // ---------------------------------------------------------------------------
 
-fn cmd_bnm_dispatch(args: BnmArgs) {
+fn cmd_bnm_dispatch(args: BnmArgs, scratch: bool) {
     let (preset_name, phase, init) = build_bnm_inputs(
         args.preset,
         args.w_tolerance,
@@ -414,13 +417,16 @@ fn cmd_bnm_dispatch(args: BnmArgs) {
         max_steps: args.max_steps,
         convergence_tol: args.convergence_tol,
     };
-    cmd_bnm(BnmRunArgs {
-        preset_name,
-        phase,
-        dynamics,
-        init,
-        output_base: args.output_dir,
-    });
+    cmd_bnm(
+        BnmRunArgs {
+            preset_name,
+            phase,
+            dynamics,
+            init,
+            output_base: args.output_dir,
+        },
+        scratch,
+    );
 }
 
 /// 投機文字列をパース．
@@ -485,7 +491,7 @@ fn parse_asymmetry_string(s: &str) -> FlowAsymmetry {
     a
 }
 
-fn cmd_tipping_dispatch(args: TippingArgs) {
+fn cmd_tipping_dispatch(args: TippingArgs, scratch: bool) {
     let (preset_name, phase, init) = build_bnm_inputs(
         args.preset,
         args.w_tolerance,
@@ -507,15 +513,18 @@ fn cmd_tipping_dispatch(args: TippingArgs) {
         asymmetry,
         channeling: args.channeling,
     };
-    cmd_tipping(TippingRunArgs {
-        preset_name,
-        tipping,
-        init,
-        output_base: args.output_dir,
-    });
+    cmd_tipping(
+        TippingRunArgs {
+            preset_name,
+            tipping,
+            init,
+            output_base: args.output_dir,
+        },
+        scratch,
+    );
 }
 
-fn cmd_bnm_basin_dispatch(args: BnmBasinCliArgs) {
+fn cmd_bnm_basin_dispatch(args: BnmBasinCliArgs, scratch: bool) {
     let (preset_name, phase, _) = build_bnm_inputs(
         args.preset,
         args.w_tolerance,
@@ -529,14 +538,17 @@ fn cmd_bnm_basin_dispatch(args: BnmBasinCliArgs) {
         convergence_tol: args.convergence_tol,
     };
     let (n_w, n_b) = parse_grid_string(&args.init_grid);
-    cmd_bnm_basin(BnmBasinArgs {
-        preset_name,
-        phase,
-        dynamics,
-        n_w,
-        n_b,
-        output_base: args.output_dir,
-    });
+    cmd_bnm_basin(
+        BnmBasinArgs {
+            preset_name,
+            phase,
+            dynamics,
+            n_w,
+            n_b,
+            output_base: args.output_dir,
+        },
+        scratch,
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -747,7 +759,7 @@ fn close_shared(cell: &Rc<RefCell<Option<Stage>>>) {
     }
 }
 
-fn cmd_run(args: RunArgs) {
+fn cmd_run(args: RunArgs, scratch: bool) {
     let total = args.rows * args.cols;
     let (n_a, n_b) = if args.n_a == 0 || args.n_b == 0 {
         let n_vacant = (total as f64 * args.vacant_rate).round() as usize;
@@ -801,6 +813,7 @@ fn cmd_run(args: RunArgs) {
     let parameters = run_config_json(&cfg, args.vacant_rate);
     let mut rv = Run::start(
         RunOptions::new("schelling", "run")
+            .scratch(scratch)
             .repo_id("schelling1971")
             .domain("simulation")
             .results_root(&args.output_dir)
@@ -868,7 +881,7 @@ fn cmd_run(args: RunArgs) {
 // sweep サブコマンド
 // ---------------------------------------------------------------------------
 
-fn cmd_sweep(args: SweepArgs) {
+fn cmd_sweep(args: SweepArgs, scratch: bool) {
     let thresholds = parse_range(&args.threshold);
     let vacant_rates = parse_range(&args.vacant_rate);
     let seeds: Vec<u64> = args
@@ -915,6 +928,7 @@ fn cmd_sweep(args: SweepArgs) {
     // sweep_id は runvault が親の run_slug で埋める．
     let parent = Run::start(
         RunOptions::new("schelling", "sweep")
+            .scratch(scratch)
             .repo_id("schelling1971")
             .domain("simulation")
             .results_root(&args.output_dir)
@@ -982,6 +996,7 @@ fn cmd_sweep(args: SweepArgs) {
         let parameters = run_config_json(&cfg, combo.vacant_rate);
         let mut child = Run::start(
             RunOptions::new("schelling", "run")
+                .scratch(scratch)
                 .repo_id("schelling1971")
                 .domain("simulation")
                 .results_root(&args.output_dir)
@@ -1074,6 +1089,9 @@ fn cmd_sweep(args: SweepArgs) {
     about = "Schelling (1971) Dynamic Models of Segregation — 再現実験"
 )]
 struct FlatRunCli {
+    /// Development run: write it under results/_scratch/ so it is never synced to the vault.
+    #[arg(long, global = true)]
+    scratch: bool,
     #[command(flatten)]
     args: RunArgs,
 }
@@ -1098,17 +1116,18 @@ fn main() {
 
     if has_subcommand {
         let cli = Cli::parse_from(&args);
+        let scratch = cli.scratch;
         match cli.command {
-            Some(Commands::Run(run_args)) => cmd_run(run_args),
-            Some(Commands::Sweep(sweep_args)) => cmd_sweep(sweep_args),
-            Some(Commands::Bnm(bnm_args)) => cmd_bnm_dispatch(bnm_args),
-            Some(Commands::BnmBasin(basin_args)) => cmd_bnm_basin_dispatch(basin_args),
-            Some(Commands::Tipping(tipping_args)) => cmd_tipping_dispatch(tipping_args),
-            None => cmd_run(RunArgs::parse_from(args.iter().take(1))),
+            Some(Commands::Run(run_args)) => cmd_run(run_args, scratch),
+            Some(Commands::Sweep(sweep_args)) => cmd_sweep(sweep_args, scratch),
+            Some(Commands::Bnm(bnm_args)) => cmd_bnm_dispatch(bnm_args, scratch),
+            Some(Commands::BnmBasin(basin_args)) => cmd_bnm_basin_dispatch(basin_args, scratch),
+            Some(Commands::Tipping(tipping_args)) => cmd_tipping_dispatch(tipping_args, scratch),
+            None => cmd_run(RunArgs::parse_from(args.iter().take(1)), scratch),
         }
     } else {
         // サブコマンドなしのフラット引数として解釈（後方互換性）
         let flat = FlatRunCli::parse_from(&args);
-        cmd_run(flat.args);
+        cmd_run(flat.args, flat.scratch);
     }
 }

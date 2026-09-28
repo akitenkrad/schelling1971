@@ -596,7 +596,7 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 [[package]]
 name = "runvault"
 version = "0.1.0"
-source = "git+https://github.com/akitenkrad/rs-runvault?branch=main#11f0a440daf7e6a2e3eb1f23ecb7fd5529ebdcf0"
+source = "git+https://github.com/akitenkrad/rs-runvault?branch=main#5591d8b452c59c7bfc4250521069d141da607c8b"
 dependencies = [
  "blake3",
  "chrono",

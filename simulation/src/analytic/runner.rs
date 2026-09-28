@@ -151,9 +151,11 @@ fn start_run<T: Serialize + ?Sized>(
     subcommand: &'static str,
     output_base: &str,
     parameters: &T,
+    scratch: bool,
 ) -> (Run, String) {
     let run = Run::start(
         RunOptions::new("schelling-analytic", subcommand)
+            .scratch(scratch)
             .repo_id("schelling1971")
             .domain("analysis")
             .results_root(output_base)
@@ -258,7 +260,7 @@ pub struct BnmRunArgs {
     pub output_base: String,
 }
 
-pub fn cmd_bnm(args: BnmRunArgs) {
+pub fn cmd_bnm(args: BnmRunArgs, scratch: bool) {
     let parameters = BnmConfigJson {
         command: "bnm",
         preset: args.preset_name.clone(),
@@ -266,7 +268,7 @@ pub fn cmd_bnm(args: BnmRunArgs) {
         dynamics: args.dynamics,
         init: Some(args.init),
     };
-    let (run, output_dir) = start_run("bnm", &args.output_base, &parameters);
+    let (run, output_dir) = start_run("bnm", &args.output_base, &parameters, scratch);
 
     println!("=== Schelling 境界近隣モデル ===");
     println!("プリセット: {:?}", args.preset_name);
@@ -374,14 +376,14 @@ fn tipping_type_label(t: TippingType) -> &'static str {
     }
 }
 
-pub fn cmd_tipping(args: TippingRunArgs) {
+pub fn cmd_tipping(args: TippingRunArgs, scratch: bool) {
     let parameters = TippingConfigJson {
         command: "tipping",
         preset: args.preset_name.clone(),
         config: args.tipping.clone(),
         init: args.init,
     };
-    let (run, output_dir) = start_run("tipping", &args.output_base, &parameters);
+    let (run, output_dir) = start_run("tipping", &args.output_base, &parameters, scratch);
 
     println!("=== Schelling ティッピングモデル ===");
     println!("プリセット: {:?}", args.preset_name);
@@ -460,7 +462,7 @@ pub fn make_default_asymmetry() -> FlowAsymmetry {
     }
 }
 
-pub fn cmd_bnm_basin(args: BnmBasinArgs) {
+pub fn cmd_bnm_basin(args: BnmBasinArgs, scratch: bool) {
     let parameters = BnmBasinConfigJson {
         command: "bnm-basin",
         preset: args.preset_name.clone(),
@@ -469,7 +471,7 @@ pub fn cmd_bnm_basin(args: BnmBasinArgs) {
         n_w: args.n_w,
         n_b: args.n_b,
     };
-    let (run, output_dir) = start_run("bnm-basin", &args.output_base, &parameters);
+    let (run, output_dir) = start_run("bnm-basin", &args.output_base, &parameters, scratch);
 
     println!("=== Schelling 境界近隣モデル — 吸引域解析 ===");
     println!("プリセット: {:?}", args.preset_name);
