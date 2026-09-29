@@ -1,8 +1,8 @@
-/// 満足判定ルール．Schelling (1971) の3種類の選好形式に対応する．
+/// Satisfaction rules corresponding to the three preference forms in Schelling (1971).
 ///
-/// - `Ratio`         : 同色近隣比率が閾値以上なら満足（デフォルト・分離型, Fig. 7-14）
-/// - `MinSame`       : 同色近隣の絶対数が下限以上なら満足（集会型, Fig. 16）
-/// - `Bounded`       : 同色近隣の絶対数が [min_same, max_same] の範囲内なら満足（統合型, Fig. 17）
+/// - `Ratio`         : Satisfied when the same-color neighbor ratio meets or exceeds the threshold (default segregation form, Fig. 7-14)
+/// - `MinSame`       : Satisfied when the absolute number of same-color neighbors meets or exceeds the minimum (congregation form, Fig. 16)
+/// - `Bounded`       : Satisfied when the absolute number of same-color neighbors is within [min_same, max_same] (integration form, Fig. 17)
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SatisfactionRule {
     Ratio { threshold: f64 },
@@ -11,11 +11,11 @@ pub enum SatisfactionRule {
 }
 
 impl SatisfactionRule {
-    /// 同色近隣数と占有近隣数から，満足かどうかを評価する．
+    /// Evaluates satisfaction from the numbers of same-color and occupied neighbors.
     pub fn evaluate(&self, same: usize, total_occupied: usize) -> bool {
         match *self {
             SatisfactionRule::Ratio { threshold } => {
-                // 占有近隣が0なら満足（既存挙動を維持）
+                // Satisfied when there are no occupied neighbors (preserves existing behavior)
                 if total_occupied == 0 {
                     return true;
                 }
@@ -28,7 +28,7 @@ impl SatisfactionRule {
         }
     }
 
-    /// CLI/ログ出力用のラベル
+    /// Label for CLI and log output
     pub fn label(&self) -> String {
         match *self {
             SatisfactionRule::Ratio { threshold } => format!("ratio:{:.3}", threshold),
@@ -40,23 +40,23 @@ impl SatisfactionRule {
     }
 }
 
-/// 移動運用モード．Schelling (1971) p.155 が区別する 2 つの運用形式に対応する．
+/// Movement operation modes corresponding to the two operation forms distinguished in Schelling (1971) p.155.
 ///
-/// - `Standard` : 緩運用．不満足エージェントのみが移動する (Fig.9–14 のデフォルト)．
-/// - `Strict`   : 厳格運用 (Fig.8)．不満足エージェントに加えて，満足している
-///   エージェントも「同色比率を厳密に改善できる空きセル」へ投機的に移動する．
-///   満足者が常により同質な近隣を探すため，分離度が緩運用より高くなる．
+/// - `Standard` : Loose operation. Only dissatisfied agents move (default for Fig.9–14).
+/// - `Strict`   : Strict operation (Fig.8). In addition to dissatisfied agents, satisfied
+///   agents also move speculatively to vacant cells that strictly improve the same-color ratio.
+///   Segregation becomes greater than under loose operation because satisfied agents always seek more homogeneous neighborhoods.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum MoveMode {
-    /// 緩運用: 不満足者のみ移動 (既存挙動)．
+    /// Loose operation: only dissatisfied agents move (existing behavior).
     #[default]
     Standard,
-    /// 厳格運用 (Fig.8): 満足者も同色比率を厳密に改善できれば移動する．
+    /// Strict operation (Fig.8): satisfied agents also move if they can strictly improve the same-color ratio.
     Strict,
 }
 
 impl MoveMode {
-    /// CLI 文字列からパースする．
+    /// Parses a CLI string.
     pub fn parse(s: &str) -> Option<MoveMode> {
         match s {
             "standard" => Some(MoveMode::Standard),
@@ -65,7 +65,7 @@ impl MoveMode {
         }
     }
 
-    /// CLI/ログ出力用のラベル．
+    /// Label for CLI and log output.
     pub fn label(self) -> &'static str {
         match self {
             MoveMode::Standard => "standard",
@@ -74,26 +74,26 @@ impl MoveMode {
     }
 }
 
-/// 移動先選択戦略．不満足エージェントが「どの満足できる空きセルへ動くか」を決める．
+/// Destination-selection strategy that determines which satisfactory vacant cell a dissatisfied agent moves to.
 ///
-/// - `Nearest`   : 最近傍 (チェビシェフ距離) で最初に見つかった満足できる空きセルへ
-///   動く (既存挙動)．Schelling の格子図 Fig.7–14 のデフォルト．
-/// - `BestLocal` : 満足できる全空きセルのうち，移動後の同色比率が最大のセルへ動く．
-///   少数派が「最も同質な区画」へ寄り集まるため，不等数 (Fig.12) の少数派クラスタ
-///   比率が論文値 (>80%) に近づく．同比率の候補は距離昇順→行優先順で先勝ち
-///   (より近く・より上左のセルを選ぶ；決定論)．探索する空きセル集合は Nearest と
-///   同一で，選択基準だけが異なる．
+/// - `Nearest`   : Moves to the first satisfactory vacant cell found at the shortest Chebyshev distance
+///   (existing behavior). Default for Schelling's lattice diagrams Fig.7–14.
+/// - `BestLocal` : Moves to the cell with the highest post-move same-color ratio among all satisfactory vacant cells.
+///   Because the minority gathers in the "most homogeneous area," the minority cluster
+///   ratio for unequal numbers (Fig.12) approaches the paper's value (>80%). Ties are resolved by
+///   shortest distance, then row-major order (selecting the nearer, upper-left cell; deterministic).
+///   The set of vacant cells searched is identical to Nearest; only the selection criterion differs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum MoveStrategy {
-    /// 最近傍で最初に満足できる空きセル (既存挙動)．
+    /// First satisfactory vacant cell at the shortest distance (existing behavior).
     #[default]
     Nearest,
-    /// 最近傍距離帯の中で移動後同色比率が最大のセル (Fig.12 クラスタ改善)．
+    /// Cell with the highest post-move same-color ratio in the nearest distance band (Fig.12 cluster improvement).
     BestLocal,
 }
 
 impl MoveStrategy {
-    /// CLI 文字列からパースする．
+    /// Parses a CLI string.
     pub fn parse(s: &str) -> Option<MoveStrategy> {
         match s {
             "nearest" => Some(MoveStrategy::Nearest),
@@ -102,7 +102,7 @@ impl MoveStrategy {
         }
     }
 
-    /// CLI/ログ出力用のラベル．
+    /// Label for CLI and log output.
     pub fn label(self) -> &'static str {
         match self {
             MoveStrategy::Nearest => "nearest",
@@ -111,37 +111,37 @@ impl MoveStrategy {
     }
 }
 
-/// シミュレーション設定
+/// Simulation configuration
 #[derive(Debug, Clone)]
 pub struct Config {
-    /// グリッドの行数
+    /// Number of grid rows
     pub rows: usize,
-    /// グリッドの列数
+    /// Number of grid columns
     pub cols: usize,
-    /// 集団Aのエージェント数
+    /// Number of agents in group A
     pub n_a: usize,
-    /// 集団Bのエージェント数
+    /// Number of agents in group B
     pub n_b: usize,
-    /// 満足判定ルール
+    /// Satisfaction rule
     pub rule: SatisfactionRule,
-    /// 移動運用モード (緩運用 = Standard / 厳格運用 = Strict, Fig.8)
+    /// Movement operation mode (loose operation = Standard / strict operation = Strict, Fig.8)
     pub move_mode: MoveMode,
-    /// 移動先選択戦略 (Nearest = 既存 / BestLocal = Fig.12 クラスタ改善)
+    /// Destination-selection strategy (Nearest = existing / BestLocal = Fig.12 cluster improvement)
     pub move_strategy: MoveStrategy,
-    /// 最大反復回数
+    /// Maximum number of iterations
     pub max_iterations: usize,
-    /// 乱数シード (None の場合はランダム)
+    /// Random seed (random when None)
     pub seed: Option<u64>,
-    /// スナップショットを保存するステップ間隔 (0 = 保存しない)
+    /// Step interval for saving snapshots (0 = do not save)
     pub snapshot_interval: usize,
-    /// 結果出力ディレクトリ
+    /// Results output directory
     pub output_dir: String,
 }
 
 impl Default for Config {
-    /// Schellingの論文 (Figure 7--10) に近い標準設定
+    /// Standard configuration close to that in Schelling's paper (Figure 7--10)
     fn default() -> Self {
-        // 13行16列 = 208セル，約30%空き → エージェント計146
+        // 13 rows by 16 columns = 208 cells, approximately 30% vacant → 146 agents total
         let rows = 13;
         let cols = 16;
         let total = rows * cols;

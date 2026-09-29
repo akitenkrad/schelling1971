@@ -1,7 +1,7 @@
-//! CLI から呼ばれる I/O オーケストレーション．
+//! I/O orchestration invoked from the CLI.
 //!
-//! `bnm` / `bnm-basin` サブコマンドの実装本体．許容スケジュール CSV，
-//! 反応曲線 CSV，平衡点 CSV，ベクトル場 CSV，軌跡 CSV，吸引域 CSV を生成する．
+//! Core implementation of the `bnm` / `bnm-basin` subcommands. Generates tolerance-schedule CSV,
+//! reaction-curve CSV, equilibrium CSV, vector-field CSV, trajectory CSV, and basin-of-attraction CSV files.
 
 use std::fs;
 use std::fs::File;
@@ -18,7 +18,7 @@ use super::phase::{Equilibrium, EquilibriumKind, PhaseConfig, Stability, Viabili
 use super::tipping::{classify_tipping, FlowAsymmetry, Speculation, TippingConfig, TippingType};
 
 // ---------------------------------------------------------------------------
-// config.json (bnm 用)
+// config.json (for bnm)
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,7 +49,7 @@ pub struct TippingConfigJson {
 }
 
 // ---------------------------------------------------------------------------
-// CSV 行構造体
+// CSV row structs
 // ---------------------------------------------------------------------------
 
 #[derive(Serialize)]
@@ -100,7 +100,7 @@ struct BasinRow {
 }
 
 // ---------------------------------------------------------------------------
-// 共通ユーティリティ
+// Shared utilities
 // ---------------------------------------------------------------------------
 
 fn equilibrium_kind_label(kind: EquilibriumKind) -> &'static str {
@@ -130,23 +130,25 @@ fn region_label(r: ViabilityRegion) -> &'static str {
 }
 
 fn write_csv<T: Serialize>(path: &str, rows: &[T]) {
-    let file = File::create(path).unwrap_or_else(|e| panic!("CSV作成失敗 {}: {}", path, e));
+    let file =
+        File::create(path).unwrap_or_else(|e| panic!("failed to create CSV {}: {}", path, e));
     let mut wtr = Writer::from_writer(BufWriter::new(file));
     for row in rows {
-        wtr.serialize(row).expect("CSV書き込み失敗");
+        wtr.serialize(row).expect("failed to write CSV");
     }
-    wtr.flush().expect("CSVフラッシュ失敗");
+    wtr.flush().expect("failed to flush CSV");
 }
 
 fn write_json<T: Serialize>(path: &str, value: &T) {
-    let file = File::create(path).unwrap_or_else(|e| panic!("JSON作成失敗 {}: {}", path, e));
-    serde_json::to_writer_pretty(BufWriter::new(file), value).expect("JSON書き込み失敗");
+    let file =
+        File::create(path).unwrap_or_else(|e| panic!("failed to create JSON {}: {}", path, e));
+    serde_json::to_writer_pretty(BufWriter::new(file), value).expect("failed to write JSON");
 }
 
-/// 解析サブコマンド用の run を開始し，`(run, artifacts ディレクトリ)` を返す．
+/// Starts a run for an analysis subcommand and returns `(run, artifacts directory)`.
 ///
-/// これらは RNG を使わない決定的な解析計算なので `domain = "analysis"` とする．
-/// `simulation` を名乗ると master_seed が必須になり，存在しないシードを書くことになる．
+/// These are deterministic analytical computations that do not use an RNG, so set `domain = "analysis"`.
+/// Using `simulation` would require master_seed and would record a nonexistent seed.
 fn start_run<T: Serialize + ?Sized>(
     subcommand: &'static str,
     output_base: &str,
@@ -160,18 +162,18 @@ fn start_run<T: Serialize + ?Sized>(
             .domain("analysis")
             .results_root(output_base)
             .parameters(parameters)
-            .expect("runvault: parameters の組み立てに失敗")
+            .expect("runvault: failed to build parameters")
             .replication(crate::record::replication()),
     )
-    .expect("runvault: run の開始に失敗");
+    .expect("runvault: failed to start run");
 
     let artifacts = run.dir().join("artifacts");
-    fs::create_dir_all(&artifacts).expect("artifacts ディレクトリの作成に失敗");
+    fs::create_dir_all(&artifacts).expect("failed to create artifacts directory");
     let dir = artifacts.to_string_lossy().into_owned();
     (run, dir)
 }
 
-/// 共通: スケジュール・反応曲線・平衡点・ベクトル場 CSV を出力する．
+/// Shared: outputs schedule, reaction-curve, equilibrium, and vector-field CSV files.
 fn dump_phase_artifacts(phase: &PhaseConfig, output_dir: &str) -> Vec<Equilibrium> {
     // tolerance_a.csv / tolerance_b.csv
     let n_samples = 200;
@@ -249,7 +251,7 @@ fn dump_phase_artifacts(phase: &PhaseConfig, output_dir: &str) -> Vec<Equilibriu
 }
 
 // ---------------------------------------------------------------------------
-// 公開エントリ: cmd_bnm
+// Public entry point: cmd_bnm
 // ---------------------------------------------------------------------------
 
 pub struct BnmRunArgs {
@@ -270,25 +272,25 @@ pub fn cmd_bnm(args: BnmRunArgs, scratch: bool) {
     };
     let (run, output_dir) = start_run("bnm", &args.output_base, &parameters, scratch);
 
-    println!("=== Schelling 境界近隣モデル ===");
-    println!("プリセット: {:?}", args.preset_name);
+    println!("=== Schelling Bounded-Neighborhood Model ===");
+    println!("Preset: {:?}", args.preset_name);
     println!(
         "W: {} | B: {} | capacity: {:?}",
         args.phase.w_schedule.label(),
         args.phase.b_schedule.label(),
         args.phase.capacity
     );
-    println!("初期値: W₀={}, B₀={}", args.init.0, args.init.1);
-    println!("出力先: {}", run.dir().display());
+    println!("Initial values: W₀={}, B₀={}", args.init.0, args.init.1);
+    println!("Output: {}", run.dir().display());
     println!("---------------------------------------");
 
-    // 共通アーティファクト出力
+    // Output shared artifacts.
     let eqs = dump_phase_artifacts(&args.phase, &output_dir);
 
-    // 軌跡を計算．単位は積分の 1 ステップ — 唯一 `--max-steps` で伸びる仕事で，
-    // 前段の CSV 出力 (許容スケジュール 200 点・反応曲線 200 点・ベクトル場
-    // 20x20) はいずれも定数で，掃引しようがない．収束すると `--max-steps` の
-    // 手前で打ち切るので，上限を分母にせず無界ステージで数える．
+    // Compute the trajectory. The unit is one integration step—the only work that grows with `--max-steps`.
+    // The preceding CSV outputs (200 tolerance-schedule points, 200 reaction-curve points, and a 20x20
+    // vector field) are all fixed-size and cannot be swept. Because convergence stops the computation
+    // before `--max-steps`, count with an unbounded stage instead of using the limit as the denominator.
     let mut stage = run.unbounded_stage("steps");
     let traj = integrate_observed(&args.phase, &args.dynamics, args.init, |_| stage.tick());
     stage.close();
@@ -303,9 +305,9 @@ pub fn cmd_bnm(args: BnmRunArgs, scratch: bool) {
         .collect();
     write_csv(&format!("{}/trajectory.csv", output_dir), &traj_rows);
 
-    // サマリ表示
+    // Display summary.
     println!(
-        "平衡点: {} 個 (端点 + 混合 + 空)",
+        "Equilibria: {} (endpoints + mixed + empty)",
         eqs.iter()
             .filter(|e| e.kind != EquilibriumKind::Empty)
             .count()
@@ -322,7 +324,7 @@ pub fn cmd_bnm(args: BnmRunArgs, scratch: bool) {
     }
     let last = traj.history.last().unwrap();
     println!(
-        "軌跡: {} ステップ | 収束: {} | 終点: ({:.2}, {:.2})",
+        "Trajectory: {} steps | Converged: {} | Endpoint: ({:.2}, {:.2})",
         traj.history.len() - 1,
         if traj.converged { "Yes" } else { "No" },
         last.w,
@@ -330,7 +332,7 @@ pub fn cmd_bnm(args: BnmRunArgs, scratch: bool) {
     );
     if let Some(eq) = traj.final_equilibrium {
         println!(
-            "  → 収束先: {} (kind={})",
+            "  → Attractor: {} (kind={})",
             equilibrium_kind_label(eq.kind),
             equilibrium_kind_label(eq.kind)
         );
@@ -339,12 +341,12 @@ pub fn cmd_bnm(args: BnmRunArgs, scratch: bool) {
         "CSV → {}/{{tolerance,reaction_curve,equilibria,vector_field,trajectory}}.csv",
         output_dir
     );
-    let dir = run.finish().expect("runvault: run の完了に失敗");
-    println!("設定 → {}/config.json", dir.display());
+    let dir = run.finish().expect("runvault: failed to finish run");
+    println!("Config → {}/config.json", dir.display());
 }
 
 // ---------------------------------------------------------------------------
-// 公開エントリ: cmd_bnm_basin
+// Public entry point: cmd_bnm_basin
 // ---------------------------------------------------------------------------
 
 pub struct BnmBasinArgs {
@@ -357,7 +359,7 @@ pub struct BnmBasinArgs {
 }
 
 // ---------------------------------------------------------------------------
-// 公開エントリ: cmd_tipping
+// Public entry point: cmd_tipping
 // ---------------------------------------------------------------------------
 
 pub struct TippingRunArgs {
@@ -385,25 +387,25 @@ pub fn cmd_tipping(args: TippingRunArgs, scratch: bool) {
     };
     let (run, output_dir) = start_run("tipping", &args.output_base, &parameters, scratch);
 
-    println!("=== Schelling ティッピングモデル ===");
-    println!("プリセット: {:?}", args.preset_name);
-    println!("初期値: W₀={}, B₀={}", args.init.0, args.init.1);
-    println!("出力先: {}", run.dir().display());
+    println!("=== Schelling Tipping Model ===");
+    println!("Preset: {:?}", args.preset_name);
+    println!("Initial values: W₀={}, B₀={}", args.init.0, args.init.1);
+    println!("Output: {}", run.dir().display());
     println!("---------------------------------------");
 
-    // 共通アーティファクト出力
+    // Output shared artifacts.
     let _eqs = dump_phase_artifacts(&args.tipping.phase, &output_dir);
 
-    // ティッピング類型分類
+    // Classify the tipping type.
     let classification = classify_tipping(&args.tipping.phase);
     println!(
-        "ティッピング類型: {} (全A安定={}, 安定混合={})",
+        "Tipping class: {} (stable all-A={}, stable mixed={})",
         tipping_type_label(classification.tipping_type),
         classification.all_a_stable,
         classification.mixed_stable_exists,
     );
 
-    // 軌跡を計算．単位は BNM と同じ積分の 1 ステップ (無界にする理由も同じ)．
+    // Compute the trajectory. The unit is one integration step, as in BNM (and is unbounded for the same reason).
     let mut stage = run.unbounded_stage("steps");
     let traj = args.tipping.integrate_observed(args.init, |_| stage.tick());
     stage.close();
@@ -418,7 +420,7 @@ pub fn cmd_tipping(args: TippingRunArgs, scratch: bool) {
         .collect();
     write_csv(&format!("{}/trajectory.csv", output_dir), &traj_rows);
 
-    // 分類サマリ
+    // Classification summary.
     write_json(
         &format!("{}/tipping_classification.json", output_dir),
         &serde_json::json!({
@@ -430,24 +432,27 @@ pub fn cmd_tipping(args: TippingRunArgs, scratch: bool) {
 
     let last = traj.history.last().unwrap();
     println!(
-        "軌跡: {} ステップ | 収束: {} | 終点: ({:.2}, {:.2})",
+        "Trajectory: {} steps | Converged: {} | Endpoint: ({:.2}, {:.2})",
         traj.history.len() - 1,
         if traj.converged { "Yes" } else { "No" },
         last.w,
         last.b
     );
     println!(
-        "  → 収束先: {:?}",
+        "  → Attractor: {:?}",
         traj.final_equilibrium
             .map(|e| equilibrium_kind_label(e.kind))
     );
     println!("CSV → {}/{{...,trajectory}}.csv", output_dir);
-    println!("分類 → {}/tipping_classification.json", output_dir);
-    let dir = run.finish().expect("runvault: run の完了に失敗");
-    println!("設定 → {}/config.json", dir.display());
+    println!(
+        "Classification → {}/tipping_classification.json",
+        output_dir
+    );
+    let dir = run.finish().expect("runvault: failed to finish run");
+    println!("Config → {}/config.json", dir.display());
 }
 
-// 抑止のための公開
+// Public to suppress warnings.
 #[allow(dead_code)]
 pub fn make_speculation_none() -> Speculation {
     Speculation::None
@@ -473,23 +478,23 @@ pub fn cmd_bnm_basin(args: BnmBasinArgs, scratch: bool) {
     };
     let (run, output_dir) = start_run("bnm-basin", &args.output_base, &parameters, scratch);
 
-    println!("=== Schelling 境界近隣モデル — 吸引域解析 ===");
-    println!("プリセット: {:?}", args.preset_name);
+    println!("=== Schelling Bounded-Neighborhood Model — Basin Analysis ===");
+    println!("Preset: {:?}", args.preset_name);
     println!(
-        "初期条件グリッド: {}×{} ({} 点)",
+        "Initial-condition grid: {}×{} ({} points)",
         args.n_w + 1,
         args.n_b + 1,
         (args.n_w + 1) * (args.n_b + 1)
     );
-    println!("出力先: {}", run.dir().display());
+    println!("Output: {}", run.dir().display());
     println!("---------------------------------------");
 
     let _eqs = dump_phase_artifacts(&args.phase, &output_dir);
 
-    // 単位は «初期条件 1 点» ．1 点あたりの積分は既定 `--max-steps 3000` で
-    // 1 ミリ秒に満たず，時間を動かすのは点数のほう (実測: 20x20 で 0.5 秒，
-    // 100x100 で 7.9 秒，200x200 で 23.6 秒)．格子は先に決まっていて，途中で
-    // 打ち切る条件も無いので，格子点の総数を分母にした有界ステージにする．
+    // The unit is one initial-condition point. Integration for one point takes less than one millisecond
+    // with the default `--max-steps 3000`; the number of points drives the runtime (measured: 0.5 seconds
+    // for 20x20, 7.9 seconds for 100x100, and 23.6 seconds for 200x200). The grid is predetermined and
+    // has no early-termination condition, so use a bounded stage with the total number of grid points as the denominator.
     let total_points = (args.n_w + 1) * (args.n_b + 1);
     let mut stage = run.stage("initial conditions", total_points);
     let basin: Vec<BasinSample> =
@@ -514,16 +519,16 @@ pub fn cmd_bnm_basin(args: BnmBasinArgs, scratch: bool) {
         .collect();
     write_csv(&format!("{}/basin.csv", output_dir), &basin_rows);
 
-    // 集計: 各収束先のサンプル数
+    // Aggregate the sample count for each convergence destination.
     let mut counts = std::collections::HashMap::<String, usize>::new();
     for r in &basin_rows {
         *counts.entry(r.converged_kind.clone()).or_insert(0) += 1;
     }
-    println!("吸引域サマリ:");
+    println!("Basin summary:");
     for (kind, n) in &counts {
-        println!("  {} → {} 点", kind, n);
+        println!("  {} → {} points", kind, n);
     }
     println!("CSV → {}/basin.csv", output_dir);
-    let dir = run.finish().expect("runvault: run の完了に失敗");
-    println!("設定 → {}/config.json", dir.display());
+    let dir = run.finish().expect("runvault: failed to finish run");
+    println!("Config → {}/config.json", dir.display());
 }

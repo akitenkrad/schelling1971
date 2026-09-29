@@ -1,15 +1,15 @@
-//! 解析モデル (Bounded-Neighborhood Model + Tipping Model) の実装．
+//! Implementation of the analytical models (Bounded-Neighborhood Model + Tipping Model).
 //!
-//! Schelling (1971) pp.167--186 の解析パートに対応する．
-//! 空間配置を捨象し，集計人口 (W, B) のみを状態変数として位相平面動学を扱う．
+//! Corresponds to the analytical portion of Schelling (1971) pp.167--186.
+//! Abstracts away spatial arrangements and treats phase-plane dynamics using only aggregate populations (W, B) as state variables.
 //!
-//! - [`tolerance`]   許容限界スケジュール (CDF) の型．
-//! - [`reaction`]    比率→絶対数変換による反応曲線．
-//! - [`phase`]       位相平面解析: 平衡点の探索と安定性判定．
-//! - [`dynamics`]    時間発展エンジン (連続Euler / 離散バッチ)．
-//! - [`tipping`]     ティッピング拡張 (投機的退出・非対称流速・類型分類)．
-//! - [`preset`]      論文準拠のプリセット設定．
-//! - [`runner`]      CLI から呼ばれる I/O オーケストレーション．
+//! - [`tolerance`]   Tolerance schedule (CDF) types.
+//! - [`reaction`]    Reaction curves converting ratios to absolute counts.
+//! - [`phase`]       Phase-plane analysis: equilibrium search and stability assessment.
+//! - [`dynamics`]    Time-evolution engine (continuous Euler / discrete batch).
+//! - [`tipping`]     Tipping extensions (speculative exit, asymmetric flow rates, and type classification).
+//! - [`preset`]      Preset configurations based on the paper.
+//! - [`runner`]      I/O orchestration invoked from the CLI.
 
 pub mod dynamics;
 pub mod phase;

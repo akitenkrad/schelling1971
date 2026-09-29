@@ -8,7 +8,7 @@ dependencies = [
     "numpy>=1.26",
     "pandas>=2.2",
     "Pillow>=10.0",
-    # run ディレクトリの読み方は runvault が持つ (read 側は pandas を使うので extra)．
+    # runvault handles reading run directories (the read side uses pandas, hence the extra).
     "runvault[read]",
 ]
 

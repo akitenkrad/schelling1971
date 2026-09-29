@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """
-visualize_tipping.py — Schelling (1971) ティッピングモデル可視化．
+visualize_tipping.py — Visualization of the Schelling (1971) tipping model.
 
-BNM 可視化に加え，tipping_classification.json を読み込んで
-in-tipping/out-tipping の有無を図中に注釈表示する．
+In addition to BNM visualization, read tipping_classification.json and annotate
+the figure to indicate the presence or absence of in-tipping/out-tipping.
 
---results_dir を省略すると
+If --results_dir is omitted, the target is the run returned by:
 `runvault path --experiment schelling-analytic --latest --subcommand tipping`
-が返す run を対象にする．
 """
 from __future__ import annotations
 
@@ -38,8 +37,9 @@ def load_classification(results_dir: str) -> dict | None:
 
 
 def annotate_classification(output_path: str, classification: dict) -> None:
-    """既存の reaction_curves.png または phase_portrait.png にラベル領域を重畳しない代わりに，
-    分類サマリを別ファイルとしてテキスト併載するシンプルな表示．
+    """Create a simple display that places the classification summary as text
+    in a separate file instead of overlaying a label area on the existing
+    reaction_curves.png or phase_portrait.png.
     """
     fig, ax = plt.subplots(figsize=(7, 4))
     ax.axis("off")
@@ -47,16 +47,16 @@ def annotate_classification(output_path: str, classification: dict) -> None:
     aw = classification.get("all_a_stable", None)
     mx = classification.get("mixed_stable_exists", None)
     text = (
-        f"ティッピング類型: {label}\n\n"
-        f"  全A端点が安定: {aw}\n"
-        f"  安定混合均衡が存在: {mx}\n\n"
-        f"類型解釈:\n"
-        f"  in_tipping_only   — B 反応曲線が全A点を覆う + 安定混合あり (B が流入し混合へ)\n"
-        f"  out_tipping_only  — 全A安定 + 安定混合なし (B が閾値超過で A が連鎖退出)\n"
-        f"  both              — 上記両方の経路が存在 (典型的ホワイトフライト)\n"
-        f"  neither           — 端点も混合も全て安定 (頑健な多相安定)\n"
+        f"Tipping type: {label}\n\n"
+        f"  All-A endpoint is stable: {aw}\n"
+        f"  Stable mixed equilibrium exists: {mx}\n\n"
+        f"Type interpretation:\n"
+        f"  in_tipping_only   — B reaction curve covers the all-A point + stable mixed equilibrium exists (B enters, leading to mixing)\n"
+        f"  out_tipping_only  — all-A is stable + no stable mixed equilibrium (A exits in a cascade once B exceeds the threshold)\n"
+        f"  both              — both paths above exist (typical white flight)\n"
+        f"  neither           — endpoints and mixed equilibria are all stable (robust multistability)\n"
     )
-    ax.text(0.02, 0.5, text, fontsize=11, family="Hiragino Sans", verticalalignment="center")
+    ax.text(0.02, 0.5, text, fontsize=11, verticalalignment="center")
     fig.tight_layout()
     fig.savefig(output_path, dpi=150)
     plt.close(fig)
@@ -65,14 +65,14 @@ def annotate_classification(output_path: str, classification: dict) -> None:
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         prog="schelling-tools visualize-tipping",
-        description="ティッピングモデル可視化 (BNM 可視化 + 分類注釈)",
+        description="Visualize the tipping model (BNM visualization + classification annotation)",
     )
     parser.add_argument("--results_dir", default=None,
-                        help="tipping の run ディレクトリ (省略時は runvault path --latest --subcommand tipping)")
+                        help="Tipping run directory (default: runvault path --latest --subcommand tipping)")
     parser.add_argument("--results_root", "--results-root", default="results",
-                        help="runvault の results ルート (default: results)")
+                        help="runvault results root (default: results)")
     parser.add_argument("--output_dir", default=None,
-                        help="図の出力ディレクトリ (省略時は <experiment>/figures/<run_slug>/)")
+                        help="Figure output directory (default: <experiment>/figures/<run_slug>/)")
     args = parser.parse_args(argv)
 
     results_dir = resolve_results_dir(
@@ -81,8 +81,8 @@ def main(argv: list[str] | None = None) -> None:
     output_dir = args.output_dir or figures_dir(results_dir)
     os.makedirs(output_dir, exist_ok=True)
 
-    print(f"[visualize-tipping] 入力: {results_dir}")
-    print(f"[visualize-tipping] 出力: {output_dir}")
+    print(f"[visualize-tipping] Input: {results_dir}")
+    print(f"[visualize-tipping] Output: {output_dir}")
 
     art = load_artifacts(results_dir)
     cls = load_classification(results_dir)
@@ -107,7 +107,7 @@ def main(argv: list[str] | None = None) -> None:
         annotate_classification(os.path.join(output_dir, "tipping_classification.png"), cls)
         figures.append("tipping_classification.png")
 
-    print(f"[visualize-tipping] 生成完了: {len(figures)} 枚")
+    print(f"[visualize-tipping] Generated {len(figures)} figures")
     for f in figures:
         print(f"  - {output_dir}/{f}")
 

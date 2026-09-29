@@ -25,13 +25,13 @@ use analytic::tipping::{FlowAsymmetry, Speculation, TippingConfig};
 use analytic::tolerance::ToleranceSchedule;
 
 // ---------------------------------------------------------------------------
-// CLI 定義
+// CLI definitions
 // ---------------------------------------------------------------------------
 
 #[derive(Parser, Debug)]
 #[command(
     name = "schelling",
-    about = "Schelling (1971) Dynamic Models of Segregation — 再現実験"
+    about = "Replication of Schelling (1971), Dynamic Models of Segregation"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -43,160 +43,160 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    /// 単一シミュレーションを実行する（デフォルト）
+    /// Run a single simulation (default)
     Run(RunArgs),
-    /// パラメータ感度解析（グリッドサーチ）を実行する
+    /// Run parameter sensitivity analysis (grid search)
     Sweep(SweepArgs),
-    /// 境界近隣モデル（解析モデル）の単発実行
+    /// Run the bounded-neighborhood model (analytical model) once
     Bnm(BnmArgs),
-    /// 境界近隣モデルの吸引域解析（初期条件グリッド掃き）
+    /// Analyze basins of attraction for the bounded-neighborhood model (initial-condition grid sweep)
     BnmBasin(BnmBasinCliArgs),
-    /// ティッピングモデル（投機・非対称・チャネリングを含む拡張動学）
+    /// Run the tipping model (extended dynamics including speculation, asymmetry, and channeling)
     Tipping(TippingArgs),
 }
 
 #[derive(Parser, Debug)]
 struct RunArgs {
-    /// グリッドの行数
+    /// Number of grid rows
     #[arg(long, default_value_t = 13)]
     rows: usize,
 
-    /// グリッドの列数
+    /// Number of grid columns
     #[arg(long, default_value_t = 16)]
     cols: usize,
 
-    /// 集団Aのエージェント数 (0 = 自動計算)
+    /// Number of agents in group A (0 = calculate automatically)
     #[arg(long, default_value_t = 0)]
     n_a: usize,
 
-    /// 集団Bのエージェント数 (0 = 自動計算)
+    /// Number of agents in group B (0 = calculate automatically)
     #[arg(long, default_value_t = 0)]
     n_b: usize,
 
-    /// 空き地率 [0, 1]
+    /// Vacancy rate [0, 1]
     #[arg(long, default_value_t = 0.30)]
     vacant_rate: f64,
 
-    /// 許容限界 τ: 同色近隣比率の最小要求値 (--rule 未指定時のみ使用)
+    /// Tolerance limit τ: minimum required same-color neighbor ratio (used only when --rule is not specified)
     #[arg(long, default_value_t = 0.333)]
     threshold: f64,
 
-    /// 満足判定ルール: "ratio:X" (分離型) / "min-same:N" (集会型, Fig.16) /
-    /// "bounded:L:H" (統合型, Fig.17)．省略時は --threshold から ratio ルールを構築する．
+    /// Satisfaction rule: "ratio:X" (segregation form) / "min-same:N" (congregation form, Fig.16) /
+    /// "bounded:L:H" (integration form, Fig.17). If omitted, construct a ratio rule from --threshold.
     #[arg(long)]
     rule: Option<String>,
 
-    /// 移動運用モード: "standard" (緩運用，不満足者のみ移動) / "strict" (厳格運用 Fig.8，
-    /// 満足者も同色比率を厳密に改善できる空きセルへ投機的に移動する)．
+    /// Movement operation mode: "standard" (loose operation; only dissatisfied agents move) / "strict" (strict operation, Fig.8;
+    /// satisfied agents also move speculatively to vacant cells that strictly improve the same-color ratio).
     #[arg(long, default_value = "standard")]
     move_mode: String,
 
-    /// 移動先選択戦略: "nearest" (最近傍で最初に満足できる空きセル，既存挙動) /
-    /// "best-local" (最近傍距離帯の中で移動後同色比率が最大のセル；不等数 Fig.12 の
-    /// 少数派クラスタ比率を改善する)．
+    /// Destination-selection strategy: "nearest" (first satisfactory vacant cell at the shortest distance; existing behavior) /
+    /// "best-local" (cell with the highest post-move same-color ratio in the nearest distance band; improves the
+    /// minority cluster ratio for unequal numbers in Fig.12).
     #[arg(long, default_value = "nearest")]
     move_strategy: String,
 
-    /// 最大反復回数
+    /// Maximum number of iterations
     #[arg(long, default_value_t = 500)]
     max_iterations: usize,
 
-    /// 乱数シード (省略時はランダム)
+    /// Random seed (random if omitted)
     #[arg(long)]
     seed: Option<u64>,
 
-    /// スナップショット保存間隔 (0 = 保存しない)
+    /// Snapshot-saving interval (0 = do not save)
     #[arg(long, default_value_t = 1)]
     snapshot_interval: usize,
 
-    /// 結果出力ディレクトリ
+    /// Results output directory
     #[arg(long, default_value = "results")]
     output_dir: String,
 }
 
 #[derive(Parser, Debug)]
 struct SweepArgs {
-    /// 許容限界 τ の範囲 ("start:stop:step" または単一値)
+    /// Range of tolerance limits τ ("start:stop:step" or a single value)
     #[arg(long, default_value = "0.333")]
     threshold: String,
 
-    /// 空き地率の範囲 ("start:stop:step" または単一値)
+    /// Range of vacancy rates ("start:stop:step" or a single value)
     #[arg(long, default_value = "0.30")]
     vacant_rate: String,
 
-    /// グリッドの行数
+    /// Number of grid rows
     #[arg(long, default_value_t = 13)]
     rows: usize,
 
-    /// グリッドの列数
+    /// Number of grid columns
     #[arg(long, default_value_t = 16)]
     cols: usize,
 
-    /// カンマ区切りの乱数シード (例: "42,123,456")
+    /// Comma-separated random seeds (e.g., "42,123,456")
     #[arg(long, default_value = "42")]
     seeds: String,
 
-    /// 最大反復回数
+    /// Maximum number of iterations
     #[arg(long, default_value_t = 500)]
     max_iterations: usize,
 
-    /// スナップショット保存間隔 (0 = 保存しない，sweepではデフォルト0)
+    /// Snapshot-saving interval (0 = do not save; default for sweep is 0)
     #[arg(long, default_value_t = 0)]
     snapshot_interval: usize,
 
-    /// 結果出力ベースディレクトリ
+    /// Base directory for result output
     #[arg(long, default_value = "results")]
     output_dir: String,
 }
 
 // ---------------------------------------------------------------------------
-// BNM 関連の CLI 引数
+// BNM-related CLI arguments
 // ---------------------------------------------------------------------------
 
 #[derive(Parser, Debug)]
 struct BnmArgs {
-    /// プリセット名 (fig18 / fig19 / fig20 / fig21 / fig22 / fig23 / fig24 / fig25 /
-    /// fig26 / fig27 / fig28 / fig29)．省略時は --w-tolerance 等を要求．
+    /// Preset name (fig18 / fig19 / fig20 / fig21 / fig22 / fig23 / fig24 / fig25 /
+    /// fig26 / fig27 / fig28 / fig29). If omitted, --w-tolerance and related arguments are required.
     #[arg(long)]
     preset: Option<String>,
 
-    /// W 集団の許容スケジュール．"linear:r_max=2.0:pop_max=100" 形式．
-    /// preset 指定時は上書きとして機能する．
+    /// Tolerance schedule for group W, in "linear:r_max=2.0:pop_max=100" form.
+    /// Overrides the preset when one is specified.
     #[arg(long)]
     w_tolerance: Option<String>,
 
-    /// B 集団の許容スケジュール．
+    /// Tolerance schedule for group B.
     #[arg(long)]
     b_tolerance: Option<String>,
 
-    /// 容量制約 W+B<=C．省略時は無制約．
+    /// Capacity constraint W+B<=C. Unlimited if omitted.
     #[arg(long)]
     capacity: Option<f64>,
 
-    /// 初期値 "W,B"．preset 指定時は preset の default_init が使われる．
+    /// Initial values "W,B". The preset's default_init is used when a preset is specified.
     #[arg(long)]
     init: Option<String>,
 
-    /// 流速モデル: "continuous:k_w=1.0:k_b=1.0:dt=0.1" / "discrete"
+    /// Flow-rate model: "continuous:k_w=1.0:k_b=1.0:dt=0.1" / "discrete"
     #[arg(long, default_value = "continuous:k_w=1.0:k_b=1.0:dt=0.1")]
     flow: String,
 
-    /// 最大ステップ数
+    /// Maximum number of steps
     #[arg(long, default_value_t = 5000)]
     max_steps: usize,
 
-    /// 収束許容誤差
+    /// Convergence tolerance
     #[arg(long, default_value_t = 1e-4)]
     convergence_tol: f64,
 
-    /// 結果出力ディレクトリ
+    /// Results output directory
     #[arg(long, default_value = "results")]
     output_dir: String,
 }
 
 #[derive(Parser, Debug)]
 struct TippingArgs {
-    /// プリセット名 (fig30a / fig30b / fig31 / fig32 など)．
+    /// Preset name (fig30a / fig30b / fig31 / fig32, etc.).
     #[arg(long)]
     preset: Option<String>,
 
@@ -212,15 +212,15 @@ struct TippingArgs {
     #[arg(long)]
     init: Option<String>,
 
-    /// 投機モデル: "none" / "linear:alpha=0.3" / "trend:window=5:weight=0.5"
+    /// Speculation model: "none" / "linear:alpha=0.3" / "trend:window=5:weight=0.5"
     #[arg(long, default_value = "none")]
     speculation: String,
 
-    /// 流速非対称: "w_in=1.0:w_out=1.0:b_in=1.0:b_out=1.0" (省略時は対称)
+    /// Flow-rate asymmetry: "w_in=1.0:w_out=1.0:b_in=1.0:b_out=1.0" (symmetric if omitted)
     #[arg(long)]
     asymmetry: Option<String>,
 
-    /// チャネリング (実効容量縮小係数 0..=1)．capacity と併用．
+    /// Channeling (effective-capacity reduction factor 0..=1). Used with capacity.
     #[arg(long)]
     channeling: Option<f64>,
 
@@ -251,7 +251,7 @@ struct BnmBasinCliArgs {
     #[arg(long)]
     capacity: Option<f64>,
 
-    /// 初期条件グリッドの分割数 "n_w x n_b"．
+    /// Number of divisions in the initial-condition grid, "n_w x n_b".
     #[arg(long, default_value = "20x20")]
     init_grid: String,
 
@@ -269,44 +269,44 @@ struct BnmBasinCliArgs {
 }
 
 // ---------------------------------------------------------------------------
-// BNM 引数パーサ
+// BNM argument parsers
 // ---------------------------------------------------------------------------
 
-/// "linear:r_max=2.0:pop_max=100" 等の文字列を ToleranceSchedule にパースする．
+/// Parses strings such as "linear:r_max=2.0:pop_max=100" into a ToleranceSchedule.
 fn parse_tolerance_string(s: &str) -> ToleranceSchedule {
     let parts: Vec<&str> = s.split(':').collect();
     let kind = parts[0];
     let mut kwargs: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
     for kv in &parts[1..] {
         let mut it = kv.splitn(2, '=');
-        let k = it.next().expect("key=value 形式が必要").to_string();
+        let k = it.next().expect("expected key=value format").to_string();
         let v: f64 = it
             .next()
-            .expect("key=value 形式が必要")
+            .expect("expected key=value format")
             .parse()
-            .expect("数値のパースに失敗");
+            .expect("failed to parse number");
         kwargs.insert(k, v);
     }
-    let pop_max = *kwargs.get("pop_max").expect("pop_max が必要");
+    let pop_max = *kwargs.get("pop_max").expect("pop_max is required");
     match kind {
         "linear" => {
-            let r_max = *kwargs.get("r_max").expect("r_max が必要");
+            let r_max = *kwargs.get("r_max").expect("r_max is required");
             ToleranceSchedule::Linear { r_max, pop_max }
         }
         "affine" => {
             let intercept_pop = *kwargs.get("intercept_pop").unwrap_or(&0.0);
-            let slope = *kwargs.get("slope").expect("slope が必要");
+            let slope = *kwargs.get("slope").expect("slope is required");
             ToleranceSchedule::Affine {
                 intercept_pop,
                 slope,
                 pop_max,
             }
         }
-        _ => panic!("未対応のスケジュール種別: \"{}\" (linear / affine)", kind),
+        _ => panic!("unsupported schedule type: \"{}\" (linear / affine)", kind),
     }
 }
 
-/// "continuous:k_w=1.0:k_b=1.0:dt=0.1" / "discrete" を FlowModel にパースする．
+/// Parses "continuous:k_w=1.0:k_b=1.0:dt=0.1" / "discrete" into a FlowModel.
 fn parse_flow_string(s: &str) -> FlowModel {
     let parts: Vec<&str> = s.split(':').collect();
     match parts[0] {
@@ -315,12 +315,12 @@ fn parse_flow_string(s: &str) -> FlowModel {
                 std::collections::HashMap::new();
             for kv in &parts[1..] {
                 let mut it = kv.splitn(2, '=');
-                let k = it.next().expect("key=value 形式が必要").to_string();
+                let k = it.next().expect("expected key=value format").to_string();
                 let v: f64 = it
                     .next()
-                    .expect("key=value 形式が必要")
+                    .expect("expected key=value format")
                     .parse()
-                    .expect("数値のパースに失敗");
+                    .expect("failed to parse number");
                 kwargs.insert(k, v);
             }
             FlowModel::Continuous {
@@ -331,31 +331,31 @@ fn parse_flow_string(s: &str) -> FlowModel {
         }
         "discrete" => FlowModel::DiscreteBatch,
         _ => panic!(
-            "未対応の flow 種別: \"{}\" (continuous / discrete)",
+            "unsupported flow type: \"{}\" (continuous / discrete)",
             parts[0]
         ),
     }
 }
 
-/// "W,B" を tuple にパースする．
+/// Parses "W,B" into a tuple.
 fn parse_init_string(s: &str) -> (f64, f64) {
     let parts: Vec<&str> = s.split(',').collect();
-    assert_eq!(parts.len(), 2, "init は \"W,B\" 形式");
-    let w: f64 = parts[0].trim().parse().expect("W のパースに失敗");
-    let b: f64 = parts[1].trim().parse().expect("B のパースに失敗");
+    assert_eq!(parts.len(), 2, "init must use \"W,B\" format");
+    let w: f64 = parts[0].trim().parse().expect("failed to parse W");
+    let b: f64 = parts[1].trim().parse().expect("failed to parse B");
     (w, b)
 }
 
-/// "20x20" を (20, 20) にパースする．
+/// Parses "20x20" into (20, 20).
 fn parse_grid_string(s: &str) -> (usize, usize) {
     let parts: Vec<&str> = s.split('x').collect();
-    assert_eq!(parts.len(), 2, "init-grid は \"NxM\" 形式");
-    let n: usize = parts[0].trim().parse().expect("N のパースに失敗");
-    let m: usize = parts[1].trim().parse().expect("M のパースに失敗");
+    assert_eq!(parts.len(), 2, "init-grid must use \"NxM\" format");
+    let n: usize = parts[0].trim().parse().expect("failed to parse N");
+    let m: usize = parts[1].trim().parse().expect("failed to parse M");
     (n, m)
 }
 
-/// BnmArgs から PhaseConfig + 初期値 + プリセット名 を組み立てる．
+/// Builds a PhaseConfig, initial values, and a preset name from BnmArgs.
 fn build_bnm_inputs(
     preset: Option<String>,
     w_tol: Option<String>,
@@ -366,7 +366,7 @@ fn build_bnm_inputs(
     if let Some(name) = &preset {
         let p = analytic::preset::lookup(name).unwrap_or_else(|| {
             panic!(
-                "未知のプリセット: \"{}\" (利用可能: {:?})",
+                "unknown preset: \"{}\" (available: {:?})",
                 name,
                 analytic::preset::all_names()
             )
@@ -387,9 +387,9 @@ fn build_bnm_inputs(
         (Some(name.clone()), phase, init)
     } else {
         let w_schedule =
-            parse_tolerance_string(&w_tol.expect("preset 未指定時は --w-tolerance が必要"));
+            parse_tolerance_string(&w_tol.expect("--w-tolerance is required without --preset"));
         let b_schedule =
-            parse_tolerance_string(&b_tol.expect("preset 未指定時は --b-tolerance が必要"));
+            parse_tolerance_string(&b_tol.expect("--b-tolerance is required without --preset"));
         let phase = PhaseConfig {
             w_schedule,
             b_schedule,
@@ -401,7 +401,7 @@ fn build_bnm_inputs(
 }
 
 // ---------------------------------------------------------------------------
-// BNM サブコマンド本体
+// BNM subcommand implementation
 // ---------------------------------------------------------------------------
 
 fn cmd_bnm_dispatch(args: BnmArgs, scratch: bool) {
@@ -429,7 +429,7 @@ fn cmd_bnm_dispatch(args: BnmArgs, scratch: bool) {
     );
 }
 
-/// 投機文字列をパース．
+/// Parses a speculation string.
 fn parse_speculation_string(s: &str) -> Speculation {
     let parts: Vec<&str> = s.split(':').collect();
     match parts[0] {
@@ -462,13 +462,13 @@ fn parse_speculation_string(s: &str) -> Speculation {
             Speculation::Trend { window, weight }
         }
         _ => panic!(
-            "未対応の投機モデル: \"{}\" (none / linear / trend)",
+            "unsupported speculation model: \"{}\" (none / linear / trend)",
             parts[0]
         ),
     }
 }
 
-/// 流速非対称文字列をパース．
+/// Parses a flow-rate asymmetry string.
 fn parse_asymmetry_string(s: &str) -> FlowAsymmetry {
     let mut a = FlowAsymmetry {
         w_inflow: 1.0,
@@ -485,7 +485,7 @@ fn parse_asymmetry_string(s: &str) -> FlowAsymmetry {
             "w_out" => a.w_outflow = v,
             "b_in" => a.b_inflow = v,
             "b_out" => a.b_outflow = v,
-            _ => panic!("未対応のキー: \"{}\" (w_in/w_out/b_in/b_out)", k),
+            _ => panic!("unsupported key: \"{}\" (w_in/w_out/b_in/b_out)", k),
         }
     }
     a
@@ -552,10 +552,10 @@ fn cmd_bnm_basin_dispatch(args: BnmBasinCliArgs, scratch: bool) {
 }
 
 // ---------------------------------------------------------------------------
-// レンジ文字列のパーサ
+// Range-string parser
 // ---------------------------------------------------------------------------
 
-/// 小数点以下の桁数を文字列表現から推定する
+/// Estimates the number of decimal places from the string representation
 fn step_decimals(v: f64) -> usize {
     let s = format!("{}", v);
     match s.find('.') {
@@ -564,23 +564,23 @@ fn step_decimals(v: f64) -> usize {
     }
 }
 
-/// "start:stop:step" → 等差数列，単一値 → 1要素のVecを返す．
-/// 浮動小数点の誤差を許容するため，ステップ数を整数で算出する．
+/// Returns an arithmetic sequence for "start:stop:step" and a one-element Vec for a single value.
+/// Calculates the number of steps as an integer to tolerate floating-point error.
 fn parse_range(s: &str) -> Vec<f64> {
     let parts: Vec<&str> = s.split(':').collect();
     match parts.len() {
         1 => {
-            let v: f64 = parts[0].parse().expect("数値のパースに失敗");
+            let v: f64 = parts[0].parse().expect("failed to parse number");
             vec![v]
         }
         3 => {
-            let start: f64 = parts[0].parse().expect("start のパースに失敗");
-            let stop: f64 = parts[1].parse().expect("stop のパースに失敗");
-            let step: f64 = parts[2].parse().expect("step のパースに失敗");
-            assert!(step > 0.0, "step は正の値でなければなりません");
-            // ステップ数を許容誤差付きで算出
+            let start: f64 = parts[0].parse().expect("failed to parse start");
+            let stop: f64 = parts[1].parse().expect("failed to parse stop");
+            let step: f64 = parts[2].parse().expect("failed to parse step");
+            assert!(step > 0.0, "step must be positive");
+            // Calculate the number of steps with a tolerance
             let n_steps = ((stop - start) / step + 0.5e-9).floor() as usize;
-            // 小数点以下の桁数を step から推定し，丸めて浮動小数点誤差を除去
+            // Infer the number of decimal places from step and round to eliminate floating-point error
             let decimals = step_decimals(step);
             let factor = 10_f64.powi(decimals as i32);
             (0..=n_steps)
@@ -588,13 +588,13 @@ fn parse_range(s: &str) -> Vec<f64> {
                 .collect()
         }
         _ => panic!(
-            "レンジ文字列の形式が不正です: \"{}\" (\"start:stop:step\" または単一値)",
+            "invalid range format: \"{}\" (expected \"start:stop:step\" or a single value)",
             s
         ),
     }
 }
 
-/// 文字列を SatisfactionRule にパースする．
+/// Parses a string into a SatisfactionRule.
 ///
 /// - "ratio:0.333"      → Ratio { threshold: 0.333 }
 /// - "min-same:3"       → MinSame { min_same: 3 }
@@ -603,33 +603,33 @@ fn parse_rule_string(s: &str) -> SatisfactionRule {
     let parts: Vec<&str> = s.split(':').collect();
     match parts.as_slice() {
         ["ratio", t] => {
-            let threshold: f64 = t.parse().expect("ratio の閾値パースに失敗");
+            let threshold: f64 = t.parse().expect("failed to parse ratio threshold");
             SatisfactionRule::Ratio { threshold }
         }
         ["min-same", n] => {
-            let min_same: usize = n.parse().expect("min-same の値パースに失敗");
+            let min_same: usize = n.parse().expect("failed to parse min-same value");
             SatisfactionRule::MinSame { min_same }
         }
         ["bounded", lo, hi] => {
-            let min_same: usize = lo.parse().expect("bounded の下限パースに失敗");
-            let max_same: usize = hi.parse().expect("bounded の上限パースに失敗");
+            let min_same: usize = lo.parse().expect("failed to parse bounded lower limit");
+            let max_same: usize = hi.parse().expect("failed to parse bounded upper limit");
             assert!(
                 min_same <= max_same,
-                "bounded ルールは下限 ({}) <= 上限 ({}) である必要があります",
+                "bounded rule requires lower limit ({}) <= upper limit ({})",
                 min_same,
                 max_same
             );
             SatisfactionRule::Bounded { min_same, max_same }
         }
         _ => panic!(
-            "不正なルール形式: \"{}\" (ratio:X, min-same:N, bounded:L:H のいずれか)",
+            "invalid rule format: \"{}\" (expected ratio:X, min-same:N, or bounded:L:H)",
             s
         ),
     }
 }
 
 // ---------------------------------------------------------------------------
-// sweep のコンソールサマリ 1 行 (ファイルには書かない)
+// One row in the sweep console summary (not written to a file)
 // ---------------------------------------------------------------------------
 
 struct SweepRow {
@@ -642,7 +642,7 @@ struct SweepRow {
 }
 
 // ---------------------------------------------------------------------------
-// sweep_config.json 用の構造体
+// Structure for sweep_config.json
 // ---------------------------------------------------------------------------
 
 #[derive(serde::Serialize)]
@@ -657,7 +657,7 @@ struct SweepConfigJson {
 }
 
 // ---------------------------------------------------------------------------
-// config.json (run 用) の構造体
+// Structure for config.json (for run)
 // ---------------------------------------------------------------------------
 
 #[derive(serde::Serialize)]
@@ -712,7 +712,7 @@ fn run_config_json(cfg: &Config, vacant_rate: f64) -> RunConfigJson {
     }
 }
 
-/// レンジ文字列をJSONに変換する（range → {start, stop, step}，単一値 → 数値）
+/// Converts a range string to JSON (range → {start, stop, step}, single value → number)
 fn range_to_json(s: &str) -> serde_json::Value {
     let parts: Vec<&str> = s.split(':').collect();
     if parts.len() == 3 {
@@ -727,15 +727,15 @@ fn range_to_json(s: &str) -> serde_json::Value {
 }
 
 // ---------------------------------------------------------------------------
-// run サブコマンド（既存の単一実行ロジック）
+// run subcommand (existing single-run logic)
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// stage の共有 (メカニズムは `'static` なので Stage を借用できない)
+// Sharing a stage (mechanisms are `'static`, so they cannot borrow a Stage)
 // ---------------------------------------------------------------------------
 
-/// `Stage` をメカニズムと共有できる形に包み，観測子と «取り出し口» を返す．
-/// 閉じるときは [`close_shared`] で取り出す．
+/// Wraps a `Stage` so it can be shared with a mechanism, returning an observer and a retrieval handle.
+/// Retrieve it with [`close_shared`] when closing.
 fn share_stage(stage: Stage) -> (Rc<RefCell<Option<Stage>>>, DecisionObserver) {
     let cell = Rc::new(RefCell::new(Some(stage)));
     let observer: DecisionObserver = {
@@ -749,10 +749,10 @@ fn share_stage(stage: Stage) -> (Rc<RefCell<Option<Stage>>>, DecisionObserver) {
     (cell, observer)
 }
 
-/// 共有していた stage を取り出して閉じる．
+/// Retrieves and closes the shared stage.
 ///
-/// manifest.csv は `finish()` で封をされる．その後に 1 行足せば，manifest が
-/// 食い違うダイジェストを持つことになる．
+/// manifest.csv is sealed by `finish()`. Adding a row afterward would leave the manifest
+/// with a mismatched digest.
 fn close_shared(cell: &Rc<RefCell<Option<Stage>>>) {
     if let Some(stage) = cell.borrow_mut().take() {
         stage.close();
@@ -779,20 +779,20 @@ fn cmd_run(args: RunArgs, scratch: bool) {
 
     let move_mode = MoveMode::parse(&args.move_mode).unwrap_or_else(|| {
         panic!(
-            "未対応の move-mode: \"{}\" (standard / strict)",
+            "unsupported move-mode: \"{}\" (standard / strict)",
             args.move_mode
         )
     });
 
     let move_strategy = MoveStrategy::parse(&args.move_strategy).unwrap_or_else(|| {
         panic!(
-            "未対応の move-strategy: \"{}\" (nearest / best-local)",
+            "unsupported move-strategy: \"{}\" (nearest / best-local)",
             args.move_strategy
         )
     });
 
-    // シードを実体化してから記録する．--seed 省略時にシミュレーション側で
-    // rand::random に落とすと，実際に使われたシードがどこにも残らない．
+    // Materialize the seed before recording it. If the simulation falls back to
+    // rand::random when --seed is omitted, the seed actually used is not recorded anywhere.
     let seed = args.seed.unwrap_or_else(rand::random::<u64>);
 
     let mut cfg = Config {
@@ -806,7 +806,7 @@ fn cmd_run(args: RunArgs, scratch: bool) {
         max_iterations: args.max_iterations,
         seed: Some(seed),
         snapshot_interval: args.snapshot_interval,
-        // Run::start が run ディレクトリを決めた後に確定する．
+        // Determined after Run::start selects the run directory.
         output_dir: String::new(),
     };
 
@@ -818,19 +818,19 @@ fn cmd_run(args: RunArgs, scratch: bool) {
             .domain("simulation")
             .results_root(&args.output_dir)
             .parameters(&parameters)
-            .expect("runvault: parameters の組み立てに失敗")
+            .expect("runvault: failed to build parameters")
             .seed_pointers(["/seed"])
             .master_seed(seed)
             .replication(record::replication()),
     )
-    .expect("runvault: run の開始に失敗");
+    .expect("runvault: failed to start run");
 
-    // run ディレクトリが出力先そのものになる．snapshots は artifacts/ の下へ．
+    // The run directory itself becomes the output destination. Snapshots go under artifacts/.
     cfg.output_dir = rv.dir().join("artifacts").to_string_lossy().into_owned();
 
-    println!("=== Schelling 分離モデル 再現実験 ===");
+    println!("=== Schelling Segregation Model Replication ===");
     println!(
-        "グリッド: {}×{} | A: {} | B: {} | 空き: {} | ルール: {} | 運用: {} | 戦略: {}",
+        "Grid: {}×{} | A: {} | B: {} | Vacant: {} | Rule: {} | Mode: {} | Strategy: {}",
         cfg.rows,
         cfg.cols,
         cfg.n_a,
@@ -840,18 +840,18 @@ fn cmd_run(args: RunArgs, scratch: bool) {
         cfg.move_mode.label(),
         cfg.move_strategy.label(),
     );
-    println!("シード: {}", seed);
-    println!("出力先: {}", rv.dir().display());
+    println!("Seed: {}", seed);
+    println!("Output: {}", rv.dir().display());
     println!("---------------------------------------");
 
-    // 単位は «エージェント 1 体の移動判断» ．ステップではない — 400x400 の
-    // 1 実行は 70.6 秒で収束まで 8 ステップ (1 ステップ 8.8 秒)，600x600 は
-    // 470 秒で 9 ステップ (1 ステップ 52 秒) と，ステップ単位では 30 秒の
-    // 報告間隔をまたいで数字が動かなくなる (実測)．
+    // The unit is one agent's movement decision, not a step: a 400x400 run takes
+    // 70.6 seconds and 8 steps to converge (8.8 seconds per step), while a 600x600 run takes
+    // 470 seconds and 9 steps (52 seconds per step). With step-based counting, the number
+    // would remain unchanged across 30-second reporting intervals (measured).
     //
-    // 無界にするのは，メカニズムが収束・行き詰まりで `request_stop` を出して
-    // 打ち切るため — `--max-iterations` は到達しない上限であって，判断の総数は
-    // 走らせる前に数えられない．
+    // This is unbounded because the mechanism terminates by issuing `request_stop` upon
+    // convergence or a deadlock: `--max-iterations` is an upper bound that is not reached,
+    // and the total number of decisions cannot be counted before execution.
     let (stage, observer) = share_stage(rv.unbounded_stage("decisions"));
     let result = run_simulation_observed(&cfg, observer);
     close_shared(&stage);
@@ -859,26 +859,32 @@ fn cmd_run(args: RunArgs, scratch: bool) {
 
     let last = result.metrics_history.last().unwrap();
     println!(
-        "収束: {} | 反復回数: {}",
+        "Converged: {} | Iterations: {}",
         if result.converged { "Yes" } else { "No" },
         result.final_iteration
     );
-    println!("平均同色近隣比率: {:.1}%", last.avg_same_ratio * 100.0);
     println!(
-        "  集団A: {:.1}%  集団B: {:.1}%",
+        "Mean same-color neighbor ratio: {:.1}%",
+        last.avg_same_ratio * 100.0
+    );
+    println!(
+        "  Group A: {:.1}%  Group B: {:.1}%",
         last.avg_same_ratio_a * 100.0,
         last.avg_same_ratio_b * 100.0
     );
-    println!("異色近隣なし割合: {:.1}%", last.pct_no_opposite);
+    println!(
+        "No-opposite-neighbor percentage: {:.1}%",
+        last.pct_no_opposite
+    );
 
-    let dir = rv.finish().expect("runvault: run の完了に失敗");
-    println!("メトリクス → {}/metrics.csv", dir.display());
-    println!("設定       → {}/config.json", dir.display());
-    println!("スナップショット → {}/artifacts/snapshots/", dir.display());
+    let dir = rv.finish().expect("runvault: failed to finish run");
+    println!("Metrics   → {}/metrics.csv", dir.display());
+    println!("Config    → {}/config.json", dir.display());
+    println!("Snapshots → {}/artifacts/snapshots/", dir.display());
 }
 
 // ---------------------------------------------------------------------------
-// sweep サブコマンド
+// sweep subcommand
 // ---------------------------------------------------------------------------
 
 fn cmd_sweep(args: SweepArgs, scratch: bool) {
@@ -887,11 +893,11 @@ fn cmd_sweep(args: SweepArgs, scratch: bool) {
     let seeds: Vec<u64> = args
         .seeds
         .split(',')
-        .map(|s| s.trim().parse::<u64>().expect("シードのパースに失敗"))
+        .map(|s| s.trim().parse::<u64>().expect("failed to parse seed"))
         .collect();
-    assert!(!seeds.is_empty(), "--seeds が空です");
+    assert!(!seeds.is_empty(), "--seeds must not be empty");
 
-    // 全組み合わせのカルテシアン積を構築
+    // Build the Cartesian product of all combinations
     struct Combo {
         threshold: f64,
         vacant_rate: f64,
@@ -913,7 +919,7 @@ fn cmd_sweep(args: SweepArgs, scratch: bool) {
     }
     let n_total = combos.len();
 
-    // 親 run: グリッド定義そのものを parameters に持つ．個別条件の指標は書かない．
+    // Parent run: parameters contain the grid definition itself; do not write metrics for individual conditions.
     let sweep_parameters = SweepConfigJson {
         threshold: range_to_json(&args.threshold),
         vacant_rate: range_to_json(&args.vacant_rate),
@@ -923,9 +929,9 @@ fn cmd_sweep(args: SweepArgs, scratch: bool) {
         max_iterations: args.max_iterations,
         snapshot_interval: args.snapshot_interval,
     };
-    // 親が持つのはシード「列」であって単一の master seed ではない．列は
-    // /parameters.seeds と seed_pointers 経由で execution_hash に残る．
-    // sweep_id は runvault が親の run_slug で埋める．
+    // The parent contains a seed "sequence," not a single master seed. The sequence remains
+    // in execution_hash through /parameters.seeds and seed_pointers.
+    // runvault fills sweep_id with the parent's run_slug.
     let parent = Run::start(
         RunOptions::new("schelling", "sweep")
             .scratch(scratch)
@@ -933,22 +939,22 @@ fn cmd_sweep(args: SweepArgs, scratch: bool) {
             .domain("simulation")
             .results_root(&args.output_dir)
             .parameters(&sweep_parameters)
-            .expect("runvault: sweep の parameters の組み立てに失敗")
+            .expect("runvault: failed to build sweep parameters")
             .seed_pointers(["/seeds"])
             .sweep_parent()
             .replication(record::replication()),
     )
-    .expect("runvault: sweep 親 run の開始に失敗");
+    .expect("runvault: failed to start parent sweep run");
 
     let sweep_id = parent
         .sweep_id()
-        .expect("runvault: sweep 親に sweep_id がありません")
+        .expect("runvault: parent sweep run has no sweep_id")
         .to_string();
     let parent_run_uid = parent.run_uid().to_string();
 
-    println!("=== Schelling 分離モデル パラメータスイープ ===");
+    println!("=== Schelling Segregation Model Parameter Sweep ===");
     println!(
-        "グリッド: {}×{} | τ: {} 値 | vacant_rate: {} 値 | シード: {} 個 | 合計: {} 実行",
+        "Grid: {}×{} | τ: {} values | vacant_rate: {} values | Seeds: {} | Total: {} runs",
         args.rows,
         args.cols,
         thresholds.len(),
@@ -956,18 +962,18 @@ fn cmd_sweep(args: SweepArgs, scratch: bool) {
         seeds.len(),
         n_total
     );
-    println!("出力先: {}", parent.dir().display());
+    println!("Output: {}", parent.dir().display());
     println!("-----------------------------------------------");
 
     let mut summary_rows: Vec<SweepRow> = Vec::with_capacity(n_total);
 
-    // 単位は «1 条件 (τ × 空き地率 × シード) の試行» ．試行の長さは収束や
-    // 行き詰まりで打ち切られて一定しないが，**試行の本数は最初から厳密に
-    // 決まっている** ので有界ステージにできる (分母はレンジを割ったのではなく
-    // `combos` を組み立てた結果そのもの)．1 試行の中でさらにステップを数えな
-    // いのは，掃引で伸びるのは条件数であって 1 試行の長さではないため
-    // (13x16・500 反復の 1 試行は数ミリ秒．実測: 50x50 で τ13 値 × 空き地率
-    // 10 値 × 5 シード = 650 試行が 92 秒)．
+    // The unit is one trial for a condition (τ × vacancy rate × seed). Trial lengths vary
+    // because they terminate on convergence or deadlock, but **the number of trials is known
+    // exactly from the start**, so the stage can be bounded (the denominator is the actual result
+    // of building `combos`, not a division of the ranges). Steps are not additionally counted
+    // within each trial because a sweep scales with the number of conditions, not the length of one trial
+    // (one 13x16 trial with 500 iterations takes a few milliseconds; measured: 13 values of τ × 10
+    // vacancy rates × 5 seeds = 650 trials on a 50x50 grid took 92 seconds).
     let mut stage = parent.stage("trials", n_total);
 
     for (i, combo) in combos.iter().enumerate() {
@@ -1001,7 +1007,7 @@ fn cmd_sweep(args: SweepArgs, scratch: bool) {
                 .domain("simulation")
                 .results_root(&args.output_dir)
                 .parameters(&parameters)
-                .expect("runvault: 子 run の parameters の組み立てに失敗")
+                .expect("runvault: failed to build child-run parameters")
                 .seed_pointers(["/seed"])
                 .master_seed(combo.seed)
                 .replicate_index(combo.replicate_index)
@@ -1012,7 +1018,7 @@ fn cmd_sweep(args: SweepArgs, scratch: bool) {
                 })
                 .replication(record::replication()),
         )
-        .expect("runvault: 子 run の開始に失敗");
+        .expect("runvault: failed to start child run");
 
         cfg.output_dir = child.dir().join("artifacts").to_string_lossy().into_owned();
 
@@ -1042,14 +1048,16 @@ fn cmd_sweep(args: SweepArgs, scratch: bool) {
             avg_same_ratio: last.avg_same_ratio,
         });
 
-        child.finish().expect("runvault: 子 run の完了に失敗");
+        child
+            .finish()
+            .expect("runvault: failed to finish child run");
         stage.tick();
     }
     stage.close();
 
-    // サマリテーブルを表示
+    // Display the summary table
     println!("===============================================");
-    println!("スイープ完了: {} 実行", n_total);
+    println!("Sweep complete: {} runs", n_total);
     println!("-----------------------------------------------");
     println!(
         "{:<10} {:<12} {:<6} {:<10} {:<6} {:<10}",
@@ -1070,23 +1078,23 @@ fn cmd_sweep(args: SweepArgs, scratch: bool) {
 
     let dir = parent
         .finish()
-        .expect("runvault: sweep 親 run の完了に失敗");
+        .expect("runvault: failed to finish parent sweep run");
     println!("-----------------------------------------------");
-    println!("スイープ定義 → {}/config.json", dir.display());
-    println!("各条件の指標は子 run (subcommand=run) の metrics.csv にあります");
+    println!("Sweep definition → {}/config.json", dir.display());
+    println!("Metrics for each condition are in the child run's metrics.csv (subcommand=run)");
 }
 
 // ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
 
-/// サブコマンドなしで実行された場合に `run` として解釈するためのラッパ構造体．
-/// clap の `try_parse_from` で先にフラット引数としてパースを試み，
-/// 失敗した場合のみサブコマンド付きでパースする．
+/// Wrapper structure that interprets an invocation without a subcommand as `run`.
+/// First attempts to parse flat arguments with clap's `try_parse_from`,
+/// and parses with a subcommand only if that fails.
 #[derive(Parser, Debug)]
 #[command(
     name = "schelling",
-    about = "Schelling (1971) Dynamic Models of Segregation — 再現実験"
+    about = "Replication of Schelling (1971), Dynamic Models of Segregation"
 )]
 struct FlatRunCli {
     /// Development run: write it under results/_scratch/ so it is never synced to the vault.
@@ -1099,7 +1107,7 @@ struct FlatRunCli {
 fn main() {
     let args: Vec<String> = std::env::args().collect();
 
-    // 第1引数がサブコマンド名かどうかで分岐
+    // Branch on whether the first argument is a subcommand name
     let has_subcommand = args
         .get(1)
         .map(|a| {
@@ -1126,7 +1134,7 @@ fn main() {
             None => cmd_run(RunArgs::parse_from(args.iter().take(1)), scratch),
         }
     } else {
-        // サブコマンドなしのフラット引数として解釈（後方互換性）
+        // Interpret as flat arguments without a subcommand (backward compatibility)
         let flat = FlatRunCli::parse_from(&args);
         cmd_run(flat.args, flat.scratch);
     }

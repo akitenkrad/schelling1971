@@ -3,28 +3,28 @@ use serde::Serialize;
 use crate::grid::Cell;
 use crate::world::SchellingWorld;
 
-/// 1ステップ分の分離度指標
+/// Segregation metrics for one step.
 #[derive(Debug, Clone, Serialize)]
 pub struct Metrics {
     pub step: usize,
-    /// 全エージェントの平均同色近隣比率
+    /// Mean same-color neighbor ratio across all agents.
     pub avg_same_ratio: f64,
-    /// 異色近隣を持たないエージェントの割合 (%)
+    /// Percentage of agents with no neighbors of another color.
     pub pct_no_opposite: f64,
-    /// 非類似性指数 D = 0.5 * Σ |a_i/A - b_i/B|  (格子全体を1ゾーンとした簡易版)
+    /// Dissimilarity index D = 0.5 * Σ |a_i/A - b_i/B|  (simplified with the entire grid as one zone)
     pub dissimilarity_index: f64,
-    /// 不満足エージェント数
+    /// Number of dissatisfied agents.
     pub n_dissatisfied: usize,
-    /// このステップで実際に移動したエージェント数
+    /// Number of agents that actually moved during this step.
     pub n_moved: usize,
-    /// 集団Aの平均同色近隣比率
+    /// Mean same-color neighbor ratio for group A.
     pub avg_same_ratio_a: f64,
-    /// 集団Bの平均同色近隣比率
+    /// Mean same-color neighbor ratio for group B.
     pub avg_same_ratio_b: f64,
 }
 
 impl Metrics {
-    /// 世界状態の現在のグリッドからメトリクスを計算する．
+    /// Calculates metrics from the current grid in the world state.
     pub fn compute(
         world: &SchellingWorld,
         step: usize,
@@ -38,8 +38,9 @@ impl Metrics {
         let mut no_opp = 0usize;
         let mut total_agents = 0usize;
 
-        // 全占有セルを走査する間，近隣バッファを 1 本だけ再利用してヒープ確保を排除する．
-        // `neighbors_into` は `neighbors` と同一順序の近隣を埋めるため，比率・異色判定は不変．
+        // Reuse one neighbor buffer while scanning all occupied cells to eliminate heap allocation.
+        // `neighbors_into` fills neighbors in the same order as `neighbors`, preserving ratio and
+        // other-color checks.
         let mut buf: Vec<(usize, usize)> = Vec::new();
 
         for r in 0..world.rows() {
@@ -63,7 +64,7 @@ impl Metrics {
                     Cell::Empty => {}
                 }
 
-                // 異色近隣がいないか確認
+                // Check whether there are no neighbors of another color.
                 if !world.has_opposite_neighbor_buf(r, c, &mut buf) {
                     no_opp += 1;
                 }
@@ -91,9 +92,9 @@ impl Metrics {
             0.0
         };
 
-        // 簡易非類似性指数: 格子全体を1ゾーンとして計算
-        // D = 0.5 * |a/A - b/B|  (完全分離=0, 完全混合=1 に近づく)
-        // ここでは補完: 分離が強いほど D が大きくなるよう符号を調整
+        // Simplified dissimilarity index: treat the entire grid as one zone.
+        // D = 0.5 * |a/A - b/B|  (complete segregation=0, approaches 1 for complete mixing)
+        // Complement here: adjust the sign so that D increases with stronger segregation.
         let dissimilarity = if count_a > 0 && count_b > 0 {
             0.5 * ((count_a as f64 / total_agents as f64) - (count_b as f64 / total_agents as f64))
                 .abs()

@@ -1,22 +1,23 @@
-"""Schelling (1971) の2次元チェッカーボードモデル（Figure 7-14）を再現するスクリプト．
+"""Reproduce Schelling's (1971) two-dimensional checkerboard model (Figure 7-14).
 
-論文の主要実験を既存のRustバイナリ (`cargo run --release`) に対して実行し，
-最終メトリクスを論文報告値と比較して表とJSONに保存する．
+Run the paper's main experiments with the existing Rust binary
+(`cargo run --release`), compare final metrics with the values reported in the
+paper, and save the results as a table and JSON.
 
 Usage:
     uv run python analysis/reproduce_paper.py
     uv run python analysis/reproduce_paper.py --seeds 42,123,456,789,2024
-    uv run python analysis/reproduce_paper.py --skip-build  # cargo buildをスキップ
-    uv run python analysis/reproduce_paper.py --only fig11  # 特定実験のみ実行
+    uv run python analysis/reproduce_paper.py --skip-build  # Skip cargo build
+    uv run python analysis/reproduce_paper.py --only fig11  # Run only a specific experiment
 
-再現対象:
-    Fig. 11 : τ=1/3, 等数,   13×16, 30%空き — 平均同色比率 ≈ 65-75%
-    Fig. 9  : τ=1/2, 等数,   13×16, 30%空き — 平均同色比率 ≈ 80-83%
-    Fig. 8  : τ=1/2 (厳格運用の近似として複数シードで試行) — 89-91%
-    Fig. 12 : τ=1/3, 不等数 2:1, 13×16, 30%空き — 少数派 > 80%
-    Fig. 14 : τ感度解析 (0.10-0.60, 0.05刻み)
-    Fig. 16 : 集会選好 (同色絶対数 ≥ 3) — 平均同色比率 ≈ 75%, 異色近隣なし ≈ 38%
-    Fig. 17 : 統合選好 (同色絶対数 3-6) — 分離度は穏やかだが dead space が形成される
+Reproduction targets:
+    Fig. 11 : τ=1/3, equal numbers,   13×16, 30% vacant — mean same-color ratio ≈ 65-75%
+    Fig. 9  : τ=1/2, equal numbers,   13×16, 30% vacant — mean same-color ratio ≈ 80-83%
+    Fig. 8  : τ=1/2 (multiple seeds approximate strict operation) — 89-91%
+    Fig. 12 : τ=1/3, unequal numbers 2:1, 13×16, 30% vacant — minority > 80%
+    Fig. 14 : τ sensitivity analysis (0.10-0.60 in increments of 0.05)
+    Fig. 16 : congregation preference (absolute same-color count ≥ 3) — mean same-color ratio ≈ 75%, no opposite-color neighbors ≈ 38%
+    Fig. 17 : integration preference (absolute same-color count 3-6) — moderate segregation, but dead space forms
 """
 
 from __future__ import annotations
@@ -41,13 +42,13 @@ from runvault.read import (
 from schelling_tools.sweep_summary import sweep_summary_table
 
 # ---------------------------------------------------------------------------
-# 実験定義
+# Experiment definitions
 # ---------------------------------------------------------------------------
 
 
 @dataclass
 class Experiment:
-    """単一の論文実験に対応するパラメータ設定と期待値．"""
+    """Parameter settings and expected values for one paper experiment."""
 
     key: str
     figure: str
@@ -55,18 +56,18 @@ class Experiment:
     rows: int = 13
     cols: int = 16
     vacant_rate: float = 0.30
-    # 満足判定ルール: None のときは threshold から ratio ルールを構築する．
-    # 例: "ratio:0.333" / "min-same:3" / "bounded:3:6"
+    # Satisfaction rule: when None, construct a ratio rule from threshold.
+    # Examples: "ratio:0.333" / "min-same:3" / "bounded:3:6"
     rule: str | None = None
     threshold: float = 1.0 / 3.0
-    # 移動運用モード: "standard" (緩運用) / "strict" (厳格運用 Fig.8)
+    # Movement mode: "standard" (lenient) / "strict" (strict, Fig.8)
     move_mode: str = "standard"
-    # 移動先選択戦略: "nearest" (既存) / "best-local" (Fig.12 クラスタ改善)
+    # Destination selection strategy: "nearest" (existing) / "best-local" (Fig.12 cluster improvement)
     move_strategy: str = "nearest"
-    # エージェント数（0なら vacant_rate から自動計算で等数）
+    # Agent counts (if 0, calculate equal counts automatically from vacant_rate).
     n_a: int = 0
     n_b: int = 0
-    # 論文報告値 (参照用，比較表示に使う)
+    # Values reported in the paper (for reference and comparison displays).
     paper_avg_same_ratio: tuple[float, float] | None = None     # (min, max)
     paper_pct_no_opposite: tuple[float, float] | None = None
     paper_minority_avg_same: tuple[float, float] | None = None
@@ -98,13 +99,13 @@ class Experiment:
 
 
 def paper_experiments() -> list[Experiment]:
-    # 13×16 = 208 セル, 約30%空き = 62 空き, 146 エージェント
-    # 2:1 不等数 → 97:49 (146合計)
+    # 13×16 = 208 cells, approximately 30% vacant = 62 vacancies, 146 agents.
+    # Unequal numbers at 2:1 → 97:49 (146 total).
     return [
         Experiment(
             key="fig11_tau_one_third",
             figure="Fig. 11",
-            description="τ=1/3, 等数, ランダム初期配置 (主実験)",
+            description="τ=1/3, equal numbers, random initial placement (main experiment)",
             threshold=1.0 / 3.0,
             paper_avg_same_ratio=(0.65, 0.75),
             paper_pct_no_opposite=(35.0, 45.0),
@@ -112,7 +113,7 @@ def paper_experiments() -> list[Experiment]:
         Experiment(
             key="fig09_tau_one_half_lenient",
             figure="Fig. 9",
-            description="τ=1/2, 等数 (緩い運用)",
+            description="τ=1/2, equal numbers (lenient operation)",
             threshold=0.5,
             paper_avg_same_ratio=(0.80, 0.83),
             paper_pct_no_opposite=(38.0, 42.0),
@@ -120,7 +121,7 @@ def paper_experiments() -> list[Experiment]:
         Experiment(
             key="fig08_tau_one_half_strict",
             figure="Fig. 8",
-            description="τ=1/2, 等数 (厳格運用 — 満足者も投機的に移動する)",
+            description="τ=1/2, equal numbers (strict operation — satisfied agents also move speculatively)",
             threshold=0.5,
             move_mode="strict",
             paper_avg_same_ratio=(0.89, 0.91),
@@ -129,7 +130,7 @@ def paper_experiments() -> list[Experiment]:
         Experiment(
             key="fig12_unequal_two_to_one",
             figure="Fig. 12",
-            description="τ=1/3, 不等数 2:1 (A:97, B:49), best-local 戦略で少数派クラスタを改善",
+            description="τ=1/3, unequal numbers 2:1 (A:97, B:49), best-local strategy improves the minority cluster",
             threshold=1.0 / 3.0,
             move_strategy="best-local",
             n_a=97,
@@ -140,7 +141,7 @@ def paper_experiments() -> list[Experiment]:
         Experiment(
             key="fig16_congregationist_min_same_3",
             figure="Fig. 16",
-            description="集会選好: 同色絶対数 ≥ 3 (比率不問)",
+            description="Congregation preference: absolute same-color count ≥ 3 (regardless of ratio)",
             rule="min-same:3",
             paper_avg_same_ratio=(0.70, 0.80),
             paper_pct_no_opposite=(35.0, 42.0),
@@ -149,8 +150,8 @@ def paper_experiments() -> list[Experiment]:
             key="fig17_integrationist_bounded_3_6",
             figure="Fig. 17",
             description=(
-                "統合選好: 同色絶対数 3-6 (上下限あり) — "
-                "論文は定量値を示さず「dead space 形成」「収束困難」を定性的に報告"
+                "Integration preference: absolute same-color count 3-6 (with lower and upper bounds) — "
+                "the paper reports dead space formation and difficulty converging qualitatively, without quantitative values"
             ),
             rule="bounded:3:6",
         ),
@@ -158,18 +159,18 @@ def paper_experiments() -> list[Experiment]:
 
 
 def tau_sweep_taus() -> list[float]:
-    # Fig. 14 相当: τ=0.10, 0.15, ..., 0.60 (13点)
+    # Equivalent to Fig. 14: τ=0.10, 0.15, ..., 0.60 (13 points).
     return [round(0.10 + 0.05 * i, 2) for i in range(11)]
 
 
 # ---------------------------------------------------------------------------
-# 解析モデル (BNM + Tipping) 実験定義
+# Analytic model (BNM + Tipping) experiment definitions
 # ---------------------------------------------------------------------------
 
 
 @dataclass
 class AnalyticExperiment:
-    """解析モデル (BNM / Tipping) の単一実験．"""
+    """A single analytic model (BNM / Tipping) experiment."""
 
     key: str
     figure: str
@@ -177,10 +178,10 @@ class AnalyticExperiment:
     model: str  # "bnm" / "tipping"
     preset: str
     init: tuple[float, float] | None = None
-    # 期待値: 平衡点の (種類, 安定性) リスト，ティッピング類型 (任意)
+    # Expected values: list of equilibrium (type, stability) pairs and optional tipping type.
     expected_equilibria: list[tuple[str, str]] | None = None  # [("all_a","stable"), ...]
-    expected_tipping_type: str | None = None  # "in_tipping_only" 等
-    # 期待される収束先 (軌跡)
+    expected_tipping_type: str | None = None  # "in_tipping_only", etc.
+    # Expected convergence destination (trajectory).
     expected_converged_kind: str | None = None
 
 
@@ -189,7 +190,7 @@ def analytic_experiments() -> list[AnalyticExperiment]:
         AnalyticExperiment(
             key="fig18_linear_two_to_one",
             figure="Fig. 18",
-            description="直線型・1:2 比 — 端点2均衡 + 不安定混合．",
+            description="Linear schedule with a 1:2 ratio — two endpoint equilibria + an unstable mixed equilibrium.",
             model="bnm",
             preset="fig18",
             init=(50.0, 25.0),
@@ -202,7 +203,7 @@ def analytic_experiments() -> list[AnalyticExperiment]:
         AnalyticExperiment(
             key="fig19_steep_three_stable",
             figure="Fig. 19",
-            description="急勾配スケジュール (中央値=1.5) — 3 安定均衡．",
+            description="Steep schedule (median=1.5) — three stable equilibria.",
             model="bnm",
             preset="fig19",
             init=(60.0, 60.0),
@@ -216,7 +217,7 @@ def analytic_experiments() -> list[AnalyticExperiment]:
         AnalyticExperiment(
             key="fig20_lenient_linear",
             figure="Fig. 20",
-            description="緩勾配の直線型 (R_max=3, 対称) — 寛容化で反応曲線の頂点が上がる．",
+            description="Gradual linear schedule (R_max=3, symmetric) — increased tolerance raises the response-curve peak.",
             model="bnm",
             preset="fig20",
             init=(50.0, 50.0),
@@ -224,7 +225,7 @@ def analytic_experiments() -> list[AnalyticExperiment]:
         AnalyticExperiment(
             key="fig21_steep_linear",
             figure="Fig. 21",
-            description="急勾配の直線型 (R_max=1, 対称) — 不寛容化で頂点が下がる．",
+            description="Steep linear schedule (R_max=1, symmetric) — increased intolerance lowers the peak.",
             model="bnm",
             preset="fig21",
             init=(50.0, 50.0),
@@ -232,7 +233,7 @@ def analytic_experiments() -> list[AnalyticExperiment]:
         AnalyticExperiment(
             key="fig22_unequal_no_intersection",
             figure="Fig. 22",
-            description="不等数 — 反応曲線非交差で混合均衡なし．",
+            description="Unequal numbers — nonintersecting response curves yield no mixed equilibrium.",
             model="bnm",
             preset="fig22",
             init=(60.0, 30.0),
@@ -240,7 +241,7 @@ def analytic_experiments() -> list[AnalyticExperiment]:
         AnalyticExperiment(
             key="fig23_limiting_numbers",
             figure="Fig. 23",
-            description="入域上限クオータで混合均衡が生まれる．",
+            description="An upper admission quota creates a mixed equilibrium.",
             model="bnm",
             preset="fig23",
             init=(50.0, 15.0),
@@ -248,7 +249,7 @@ def analytic_experiments() -> list[AnalyticExperiment]:
         AnalyticExperiment(
             key="fig24_asymmetric_tolerance",
             figure="Fig. 24",
-            description="非対称許容 (A:R_max=2, B:R_max=1) — 混合均衡が偏在する．",
+            description="Asymmetric tolerance (A:R_max=2, B:R_max=1) — the mixed equilibrium is skewed.",
             model="bnm",
             preset="fig24",
             init=(50.0, 50.0),
@@ -256,7 +257,7 @@ def analytic_experiments() -> list[AnalyticExperiment]:
         AnalyticExperiment(
             key="fig25_zero_tolerance_intercept",
             figure="Fig. 25",
-            description="ゼロ許容者あり (intercept=10) — 端点流出が強まる．",
+            description="Includes zero-tolerance agents (intercept=10) — outflow at the endpoints increases.",
             model="bnm",
             preset="fig25",
             init=(60.0, 60.0),
@@ -264,7 +265,7 @@ def analytic_experiments() -> list[AnalyticExperiment]:
         AnalyticExperiment(
             key="fig26_capacity_constraint",
             figure="Fig. 26",
-            description="容量制約 C=120 — 入域競合で混合均衡が容量線上に乗る．",
+            description="Capacity constraint C=120 — admission competition places the mixed equilibrium on the capacity line.",
             model="bnm",
             preset="fig26",
             init=(60.0, 50.0),
@@ -272,7 +273,7 @@ def analytic_experiments() -> list[AnalyticExperiment]:
         AnalyticExperiment(
             key="fig27_piecewise_schedule",
             figure="Fig. 27",
-            description="区分線形スケジュール (S字CDF) — 非一様な許容分布．",
+            description="Piecewise-linear schedule (S-shaped CDF) — nonuniform tolerance distribution.",
             model="bnm",
             preset="fig27",
             init=(55.0, 55.0),
@@ -280,7 +281,7 @@ def analytic_experiments() -> list[AnalyticExperiment]:
         AnalyticExperiment(
             key="fig28_unequal_tolerant_minority",
             figure="Fig. 28",
-            description="不等数 + 少数派が寛容 (R_max=4) — 混合が生き残る．",
+            description="Unequal numbers + tolerant minority (R_max=4) — mixing persists.",
             model="bnm",
             preset="fig28",
             init=(60.0, 25.0),
@@ -288,7 +289,7 @@ def analytic_experiments() -> list[AnalyticExperiment]:
         AnalyticExperiment(
             key="fig29_strong_quota",
             figure="Fig. 29",
-            description="強いクオータ (B pop_max=20) — 混合均衡が低 B 域に固定される．",
+            description="Strong quota (B pop_max=20) — the mixed equilibrium is confined to the low-B region.",
             model="bnm",
             preset="fig29",
             init=(60.0, 10.0),
@@ -296,7 +297,7 @@ def analytic_experiments() -> list[AnalyticExperiment]:
         AnalyticExperiment(
             key="fig30a_in_tipping_only",
             figure="Fig. 30a",
-            description="in-tipping のみ．B 反応曲線が全A点を覆う．",
+            description="In-tipping only. The B response curve covers the all-A point.",
             model="tipping",
             preset="fig30a",
             expected_tipping_type="in_tipping_only",
@@ -304,7 +305,7 @@ def analytic_experiments() -> list[AnalyticExperiment]:
         AnalyticExperiment(
             key="fig30b_out_tipping_only",
             figure="Fig. 30b",
-            description="out-tipping のみ (Fig.18 と同じ構造)．",
+            description="Out-tipping only (same structure as Fig.18).",
             model="tipping",
             preset="fig30b",
             expected_tipping_type="out_tipping_only",
@@ -312,7 +313,7 @@ def analytic_experiments() -> list[AnalyticExperiment]:
         AnalyticExperiment(
             key="fig31_both_tipping",
             figure="Fig. 31",
-            description="in-tipping + out-tipping (典型ホワイトフライト)．",
+            description="In-tipping + out-tipping (typical white flight).",
             model="tipping",
             preset="fig31",
             init=(100.0, 15.0),
@@ -322,7 +323,7 @@ def analytic_experiments() -> list[AnalyticExperiment]:
         AnalyticExperiment(
             key="fig32_neither_tipping",
             figure="Fig. 32",
-            description="ティッピングなし (頑健な多相安定)．",
+            description="No tipping (robust multistability).",
             model="tipping",
             preset="fig32",
             init=(60.0, 60.0),
@@ -333,14 +334,14 @@ def analytic_experiments() -> list[AnalyticExperiment]:
 
 
 # ---------------------------------------------------------------------------
-# Rustバイナリ呼び出し
+# Rust binary invocation
 # ---------------------------------------------------------------------------
 
 
-# プロジェクトルート (workspace root) を特定する．
-# 本モジュールは tools/src/schelling_tools/reproduce_paper.py にあるので，
-# `parents[3]` が workspace ルートとなる．
-# 環境変数 SCHELLING_PROJECT_ROOT で上書き可能．
+# Locate the project root (workspace root).
+# This module is at tools/src/schelling_tools/reproduce_paper.py, so
+# `parents[3]` is the workspace root.
+# The SCHELLING_PROJECT_ROOT environment variable can override it.
 import os as _os
 _env_root = _os.environ.get("SCHELLING_PROJECT_ROOT")
 if _env_root:
@@ -359,26 +360,26 @@ def ensure_build() -> None:
 
 
 def run_cargo(args: list[str], cwd: Path) -> None:
-    """cargoサブプロセスを起動し，失敗したら例外を投げる．"""
+    """Start a cargo subprocess and raise an exception if it fails."""
     subprocess.run(args, cwd=cwd, check=True, stdout=subprocess.DEVNULL)
 
 
 def latest_run(output_dir: Path, subcommand: str, experiment: str = "schelling") -> Path:
-    """`--output-dir output_dir` で走らせた run のディレクトリを runvault に聞く．
+    """Ask runvault for the directory of a run launched with `--output-dir output_dir`.
 
-    出力は `<output_dir>/<experiment>/<run_slug>/` に落ちるので，ディレクトリの
-    並び方をこちら側で推測しない．
+    Output is written to `<output_dir>/<experiment>/<run_slug>/`, so do not infer
+    the directory layout here.
     """
     return Path(runvault_path(experiment, str(output_dir), subcommand=subcommand))
 
 
 def read_final_metrics(output_dir: Path) -> dict:
-    """直前に走らせた run の metrics.csv から最終値を読む．"""
+    """Read final values from metrics.csv for the most recently executed run."""
     run_dir = latest_run(output_dir, "run")
     metrics_path = run_dir / "metrics.csv"
     df = metrics_wide(metrics_path)
     if df.empty:
-        raise ValueError(f"空の metrics.csv: {metrics_path}")
+        raise ValueError(f"Empty metrics.csv: {metrics_path}")
     final = df.iloc[-1]
     initial = df.iloc[0]
     scoped = scope_metrics_from_csv(metrics_path)
@@ -398,19 +399,19 @@ def read_final_metrics(output_dir: Path) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# 実験ランナー
+# Experiment runners
 # ---------------------------------------------------------------------------
 
 
 def run_experiment(exp: Experiment, seeds: list[int], base_dir: Path) -> dict:
-    """1つの実験設定を複数シードで実行し，集計結果を返す．"""
+    """Run one experiment setting with multiple seeds and return aggregated results."""
     exp_dir = base_dir / exp.key
     exp_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"--- {exp.figure}: {exp.description} ---")
-    print(f"    ルール={exp.rule_label()} | グリッド={exp.rows}×{exp.cols} "
+    print(f"    rule={exp.rule_label()} | grid={exp.rows}×{exp.cols} "
           f"| A:B={'auto' if exp.n_a == 0 else f'{exp.n_a}:{exp.n_b}'} "
-          f"| 空き率={exp.vacant_rate:.2f} | seeds={seeds}")
+          f"| vacant rate={exp.vacant_rate:.2f} | seeds={seeds}")
 
     per_seed: list[dict] = []
     for seed in seeds:
@@ -426,7 +427,7 @@ def run_experiment(exp: Experiment, seeds: list[int], base_dir: Path) -> dict:
               f"(A={m['avg_same_ratio_a']:.3f}, B={m['avg_same_ratio_b']:.3f}) "
               f"no_opp={m['pct_no_opposite']:.1f}%")
 
-    # シード間の平均と標準偏差を集計
+    # Aggregate the mean and standard deviation across seeds.
     def agg(key: str) -> dict:
         xs = [r[key] for r in per_seed]
         return {
@@ -468,12 +469,12 @@ def run_experiment(exp: Experiment, seeds: list[int], base_dir: Path) -> dict:
 
 
 def run_analytic_experiment(exp: AnalyticExperiment, base_dir: Path) -> dict:
-    """1つの解析モデル実験を実行する (BNM または Tipping)．"""
+    """Run one analytic model experiment (BNM or Tipping)."""
     exp_dir = base_dir / exp.key
     exp_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"--- {exp.figure}: {exp.description} ---")
-    print(f"    モデル={exp.model} | プリセット={exp.preset} | init={exp.init}")
+    print(f"    model={exp.model} | preset={exp.preset} | init={exp.init}")
 
     args = [
         "cargo", "run", "--release", "--quiet", "--",
@@ -485,7 +486,7 @@ def run_analytic_experiment(exp: AnalyticExperiment, base_dir: Path) -> dict:
         args += ["--init", f"{exp.init[0]},{exp.init[1]}"]
     run_cargo(args, cwd=PROJECT_ROOT)
 
-    # 出力を解析: 解析サブコマンドは experiment=schelling-analytic に落ちる
+    # Parse output: analytic subcommands use experiment=schelling-analytic.
     run_dir = latest_run(exp_dir, exp.model, experiment="schelling-analytic")
     csv_dir = Path(artifacts_dir(run_dir))
 
@@ -502,7 +503,7 @@ def run_analytic_experiment(exp: AnalyticExperiment, base_dir: Path) -> dict:
                     "stability": row["stability"],
                 })
 
-    # trajectory.csv (終点)
+    # trajectory.csv (endpoint)
     traj_path = csv_dir / "trajectory.csv"
     traj_final = None
     if traj_path.exists():
@@ -524,7 +525,7 @@ def run_analytic_experiment(exp: AnalyticExperiment, base_dir: Path) -> dict:
         with cls_path.open() as f:
             classification = json.load(f)
 
-    # 期待値との照合
+    # Compare with expected values.
     eq_kinds_observed = {(e["kind"], e["stability"]) for e in equilibria}
     eq_match = None
     if exp.expected_equilibria is not None:
@@ -534,7 +535,7 @@ def run_analytic_experiment(exp: AnalyticExperiment, base_dir: Path) -> dict:
         tipping_match = classification.get("type") == exp.expected_tipping_type
     converged_match = None
     if exp.expected_converged_kind is not None and traj_final is not None:
-        # 終点が期待される平衡点に近いか (閾値 5%)
+        # Check whether the endpoint is near the expected equilibrium (5% threshold).
         target = next(
             (e for e in equilibria if e["kind"] == exp.expected_converged_kind
              and e["stability"] == "stable"),
@@ -546,12 +547,12 @@ def run_analytic_experiment(exp: AnalyticExperiment, base_dir: Path) -> dict:
                  (target["b"] - traj_final["b"]) ** 2) ** 0.5
             converged_match = d < 0.05 * scale
 
-    print(f"    平衡点: {len(equilibria)} 個")
+    print(f"    equilibria: {len(equilibria)} total")
     if classification is not None:
-        print(f"    ティッピング類型: {classification.get('type')}")
+        print(f"    tipping type: {classification.get('type')}")
     if traj_final is not None:
-        print(f"    軌跡終点: ({traj_final['a']:.2f}, {traj_final['b']:.2f}) "
-              f"({traj_final['n_steps']} ステップ)")
+        print(f"    trajectory endpoint: ({traj_final['a']:.2f}, {traj_final['b']:.2f}) "
+              f"({traj_final['n_steps']} steps)")
 
     return {
         "experiment": exp.key,
@@ -574,15 +575,15 @@ def run_analytic_experiment(exp: AnalyticExperiment, base_dir: Path) -> dict:
 
 
 def run_tau_sweep(seeds: list[int], base_dir: Path) -> dict:
-    """Fig. 14 相当: τ=0.10-0.60 でスイープを実行し，均衡同色比率の非線形性を再現する．"""
+    """Reproduce Fig. 14 by sweeping τ=0.10-0.60 and its nonlinear equilibrium same-color ratio."""
     sweep_dir = base_dir / "fig14_tau_sweep"
     sweep_dir.mkdir(parents=True, exist_ok=True)
 
     taus = tau_sweep_taus()
-    print(f"--- Fig. 14: τ感度解析 (τ={taus[0]:.2f}-{taus[-1]:.2f}) ---")
+    print(f"--- Fig. 14: τ sensitivity analysis (τ={taus[0]:.2f}-{taus[-1]:.2f}) ---")
 
     seeds_str = ",".join(str(s) for s in seeds)
-    # start:stop:step形式で cargo sweep を呼ぶ
+    # Invoke cargo sweep in start:stop:step format.
     tau_range = f"{taus[0]:.2f}:{taus[-1]:.2f}:0.05"
     args = [
         "cargo", "run", "--release", "--quiet", "--",
@@ -596,12 +597,13 @@ def run_tau_sweep(seeds: list[int], base_dir: Path) -> dict:
     ]
     run_cargo(args, cwd=PROJECT_ROOT)
 
-    # 1 行 1 条件の表は子 run から組み直す (sweep_summary.csv はもう書かれない)
+    # Rebuild the one-row-per-condition table from child runs
+    # (sweep_summary.csv is no longer written).
     parent_dir = latest_run(sweep_dir, "sweep")
     summary = sweep_summary_table(parent_dir)
     rows = summary.to_dict("records")
 
-    # τごとに集計
+    # Aggregate by τ.
     by_tau: dict[float, list[dict]] = {}
     for row in rows:
         tau = round(float(row["threshold"]), 3)
@@ -628,7 +630,7 @@ def run_tau_sweep(seeds: list[int], base_dir: Path) -> dict:
     return {
         "experiment": "fig14_tau_sweep",
         "figure": "Fig. 14",
-        "description": "τ感度解析: 0.35-0.50 で均衡同色比率が急上昇",
+        "description": "τ sensitivity analysis: equilibrium same-color ratio rises sharply from 0.35 to 0.50",
         "taus": taus,
         "seeds": seeds,
         "table": table,
@@ -637,12 +639,12 @@ def run_tau_sweep(seeds: list[int], base_dir: Path) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# レポート生成
+# Report generation
 # ---------------------------------------------------------------------------
 
 
 def _format_range(rng: tuple[float, float] | None, unit: str = "") -> str:
-    """レンジを "min — max" 形式で整形する．値はそのまま表示する（単位変換しない）．"""
+    """Format a range as "min — max", displaying values without unit conversion."""
     if rng is None:
         return "-"
     if unit == "%":
@@ -657,14 +659,14 @@ def _in_range(value: float, rng: tuple[float, float] | None) -> str:
 
 
 def render_analytic_comparison(experiments: list[dict]) -> str:
-    """解析モデル (BNM + Tipping) の再現結果サマリ．"""
+    """Summarize analytic model (BNM + Tipping) reproduction results."""
     if not experiments:
         return ""
     lines = []
     lines.append("=" * 90)
-    lines.append("解析モデル (BNM + Tipping) 再現結果")
+    lines.append("Analytic model (BNM + Tipping) reproduction results")
     lines.append("=" * 90)
-    lines.append(f"{'Figure':<10}{'モデル':<10}{'平衡点':<10}{'類型':<22}{'軌跡照合':<12}")
+    lines.append(f"{'Figure':<10}{'Model':<10}{'Equilibria':<10}{'Type':<22}{'Trajectory':<12}")
     lines.append("-" * 90)
 
     for exp in experiments:
@@ -675,7 +677,7 @@ def render_analytic_comparison(experiments: list[dict]) -> str:
             mark = "✓" if exp["match_tipping_type"] else "✗"
             cls_label = f"{cls_label} {mark}"
 
-        eq_label = f"{n_eq} 個"
+        eq_label = f"{n_eq} total"
         if exp["expected_equilibria"] is not None:
             mark = "✓" if exp["match_equilibria"] else "✗"
             eq_label = f"{eq_label} {mark}"
@@ -695,7 +697,7 @@ def render_analytic_comparison(experiments: list[dict]) -> str:
 def render_comparison(experiments: list[dict], tau_sweep: dict | None) -> str:
     lines = []
     lines.append("=" * 90)
-    lines.append("Schelling (1971) 論文再現結果  vs  論文報告値")
+    lines.append("Schelling (1971) reproduction results vs. values reported in the paper")
     lines.append("=" * 90)
     header = (f"{'Figure':<10}{'avg_same_ratio':<28}{'pct_no_opposite':<28}{'converged':<12}")
     lines.append(header)
@@ -721,7 +723,7 @@ def render_comparison(experiments: list[dict], tau_sweep: dict | None) -> str:
                      f"{avg_cell:<14}(paper:{paper_avg:<10}) "
                      f"{no_opp_cell:<14}(paper:{paper_no_opp:<10}) "
                      f"{conv_cell}")
-        # 不等数の場合は少数派集団の平均同色比率も表示
+        # For unequal numbers, also display the minority group's mean same-color ratio.
         if ref["minority_avg_same"] is not None:
             params = exp["parameters"]
             if params["n_a"] > params["n_b"]:
@@ -731,12 +733,12 @@ def render_comparison(experiments: list[dict], tau_sweep: dict | None) -> str:
             minority_mean = agg[minority_key]["mean"]
             in_range = _in_range(minority_mean, ref["minority_avg_same"])
             paper_minority = _format_range(ref["minority_avg_same"])
-            lines.append(f"{'':10}少数派同色比率: {minority_mean:.3f} {in_range} "
+            lines.append(f"{'':10}minority same-color ratio: {minority_mean:.3f} {in_range} "
                          f"(paper: {paper_minority})")
 
     if tau_sweep is not None:
         lines.append("-" * 90)
-        lines.append("Fig. 14  τ感度解析（均衡時平均同色比率）")
+        lines.append("Fig. 14  τ sensitivity analysis (mean same-color ratio at equilibrium)")
         lines.append(f"{'τ':<8}{'avg_same':<16}{'pct_no_opposite':<16}")
         for row in tau_sweep["table"]:
             lines.append(f"{row['threshold']:<8.2f}"
@@ -747,7 +749,7 @@ def render_comparison(experiments: list[dict], tau_sweep: dict | None) -> str:
 
 
 # ---------------------------------------------------------------------------
-# メイン
+# Main entry point
 # ---------------------------------------------------------------------------
 
 
@@ -758,31 +760,31 @@ def main(argv: list[str] | None = None) -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--seeds", default="42,123,456,789,2024",
-                        help="カンマ区切りの乱数シード (デフォルト: 5個)")
+                        help="Comma-separated random seeds (default: 5 seeds)")
     parser.add_argument("--output-dir", default="results/paper_reproduction",
-                        help="結果出力先 (プロジェクトルートからの相対パス)")
+                        help="Results output directory (relative to the project root)")
     parser.add_argument("--skip-build", action="store_true",
-                        help="cargo build --release をスキップ")
+                        help="Skip cargo build --release")
     parser.add_argument("--skip-sweep", action="store_true",
-                        help="τ感度解析 (Fig. 14) をスキップ")
+                        help="Skip the τ sensitivity analysis (Fig. 14)")
     parser.add_argument("--skip-analytic", action="store_true",
-                        help="解析モデル (BNM + Tipping, Fig. 18-32) をスキップ")
+                        help="Skip analytic models (BNM + Tipping, Fig. 18-32)")
     parser.add_argument("--analytic-only", action="store_true",
-                        help="解析モデルのみ実行（空間モデルとτ感度解析をスキップ）")
+                        help="Run only analytic models (skip the spatial model and τ sensitivity analysis)")
     parser.add_argument("--only", default=None,
-                        help="指定したexperiment keyのみ実行 (カンマ区切り可)")
+                        help="Run only the specified experiment keys (comma-separated)")
     args = parser.parse_args(argv)
 
     seeds = [int(s.strip()) for s in args.seeds.split(",")]
 
-    # 実行タイムスタンプ付きベースディレクトリ
+    # Base directory with an execution timestamp.
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     base_dir = PROJECT_ROOT / args.output_dir / timestamp
     base_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"=== Schelling (1971) 論文実験再現 ===")
-    print(f"    出力先: {base_dir.relative_to(PROJECT_ROOT)}")
-    print(f"    シード: {seeds}")
+    print(f"=== Schelling (1971) paper experiment reproduction ===")
+    print(f"    output: {base_dir.relative_to(PROJECT_ROOT)}")
+    print(f"    seeds: {seeds}")
     print()
 
     if not args.skip_build:
@@ -795,7 +797,7 @@ def main(argv: list[str] | None = None) -> int:
         experiments = [e for e in experiments if e.key in wanted]
         analytic_exps = [e for e in analytic_exps if e.key in wanted]
         if not experiments and not analytic_exps:
-            print(f"エラー: --only で指定されたキーが見つかりません: {args.only}", file=sys.stderr)
+            print(f"Error: no keys specified by --only were found: {args.only}", file=sys.stderr)
             return 1
 
     if args.analytic_only:
@@ -817,14 +819,14 @@ def main(argv: list[str] | None = None) -> int:
             analytic_results.append(run_analytic_experiment(aexp, base_dir))
             print()
 
-    # レポート出力
+    # Write the report.
     report_parts = [render_comparison(results, tau_sweep)] if results or tau_sweep else []
     if analytic_results:
         report_parts.append(render_analytic_comparison(analytic_results))
     report = "\n\n".join(report_parts)
     print(report)
 
-    # サマリ保存
+    # Save the summary.
     summary = {
         "timestamp": timestamp,
         "seeds": seeds,
@@ -839,7 +841,7 @@ def main(argv: list[str] | None = None) -> int:
     with report_path.open("w") as f:
         f.write(report + "\n")
 
-    # 結果CSV (主要実験のみ)
+    # Results CSV (main experiments only).
     csv_path = base_dir / "reproduction_summary.csv"
     with csv_path.open("w", newline="") as f:
         writer = csv.writer(f)
@@ -863,8 +865,8 @@ def main(argv: list[str] | None = None) -> int:
                 ])
 
     print()
-    print(f"サマリJSON → {summary_path.relative_to(PROJECT_ROOT)}")
-    print(f"レポート   → {report_path.relative_to(PROJECT_ROOT)}")
+    print(f"Summary JSON → {summary_path.relative_to(PROJECT_ROOT)}")
+    print(f"Report       → {report_path.relative_to(PROJECT_ROOT)}")
     print(f"CSV        → {csv_path.relative_to(PROJECT_ROOT)}")
     return 0
 

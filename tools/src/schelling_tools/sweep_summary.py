@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""スイープの «1 行 1 条件» の表．
+"""A sweep table with one row per condition.
 
-run ディレクトリの読み方そのものは `runvault.read` にある．ここに残るのは
-Schelling モデル固有の部分だけ — どの列を持つ表なのか (`threshold` /
-`vacant_rate` / `dissimilarity_index` …) と，runvault 移行前のスイープが使って
-いた子 run のディレクトリ名である．どちらもこの論文のモデルの話であって，
-run ディレクトリの読み方ではないので，共通部品には置かない．
+The mechanics of reading run directories are in `runvault.read`. Only the
+Schelling model-specific parts remain here: the table columns (`threshold` /
+`vacant_rate` / `dissimilarity_index` ...) and the child run directory names
+used by sweeps before the runvault migration. Both concern the model in this
+paper rather than how run directories are read, so they do not belong in the
+shared components.
 """
 from __future__ import annotations
 
@@ -24,20 +25,20 @@ __all__ = ["legacy_run_dir_name", "sweep_summary_table"]
 
 
 def legacy_run_dir_name(threshold: float, vacant_rate: float, seed: int) -> str:
-    """runvault 移行前の sweep が使っていた子 run のディレクトリ名．"""
+    """Return the child run directory name used before the runvault migration."""
     return f"tau_{threshold:.3f}_vac_{vacant_rate:.3f}_seed_{seed}"
 
 
 def sweep_summary_table(sweep_dir: str | os.PathLike) -> pd.DataFrame:
-    """1 行 1 条件のサマリ表を用意する．
+    """Build a summary table with one row per condition.
 
-    runvault ではこの表はファイルとして存在しない．sweep 親の子 run
-    (`lineage.parent_run_uid` が親の `run_uid`) を集め，各子の `config.json` の
-    `parameters` と `metrics.csv` の最終値から組み直す．legacy のスイープには
-    `sweep_summary.csv` があるのでそれを読む．
+    In runvault, this table does not exist as a file. Collect the child runs of
+    the sweep parent (where `lineage.parent_run_uid` is the parent's `run_uid`)
+    and rebuild it from each child's `parameters` in `config.json` and final
+    values in `metrics.csv`. Legacy sweeps have `sweep_summary.csv`, so read it.
 
-    どちらの経路でも `snapshots_dir` 列を付けるので，呼び出し側は条件から
-    ディレクトリ名を composing しなくてよい．
+    Both paths add a `snapshots_dir` column, so callers do not need to compose
+    directory names from the conditions.
     """
     sweep_dir = str(sweep_dir)
     legacy = os.path.join(sweep_dir, "sweep_summary.csv")
@@ -56,9 +57,9 @@ def sweep_summary_table(sweep_dir: str | os.PathLike) -> pd.DataFrame:
     children = sweep_children(sweep_dir)
     if not children:
         raise SystemExit(
-            f"エラー: この sweep 親に紐づく子 run が見つかりません: {sweep_dir}\n"
-            "  子 run は lineage.parent_run_uid で親を指します．"
-            "親と子が同じ results ルートにあるか確認してください．"
+            f"Error: no child runs associated with this sweep parent were found: {sweep_dir}\n"
+            "  Child runs identify their parent through lineage.parent_run_uid."
+            "Verify that the parent and child runs are under the same results root."
         )
 
     rows: list[dict] = []

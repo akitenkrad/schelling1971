@@ -1,139 +1,139 @@
-# 指標が何を測っているか (runvault の宣言．rs-runvault docs/metrics.ja.md)．
+# What each metric measures (runvault declaration; rs-runvault docs/metrics.ja.md).
 #
-# `Run::start` がこのファイルを読み，`finish()` が «その run が実際に記録した名前に
-# 当たる分だけ» を run の `metrics.meta.json` へ写す．名前は `simulation/src/record.rs`
-# が書いているものと一致していなければならない．
+# `Run::start` reads this file, and `finish()` copies entries into the run's `metrics.meta.json`
+# only for names actually recorded by that run. The names must match those written by
+# `simulation/src/record.rs`.
 #
-# `direction` は «どちらが良いか» であって «どちらが大きいか» ではない．分居の強さは
-# 模型の記述であって成績ではないので `none` を書く — Schelling の主張は «穏やかな選好
-# でも分居が生じる» であり，分居が望ましいとは言っていない．「誰も決めていない」
-# (欄を書かない) と区別するために，決めた結果としての `none` を明示する．
+# `direction` means "which is better," not "which is larger." Segregation strength describes the
+# model rather than its performance, so it is set to `none`: Schelling's claim is that segregation
+# arises even from mild preferences, not that segregation is desirable. Explicit `none` records a
+# deliberate decision, distinguishing it from "undecided" (omitting the field).
 
 [metrics."avg_same_ratio"]
-meaning   = "全エージェントの同色近傍率の平均．無作為配置では群比 (≈0.5) 付近で，収束時は 0.6〜0.9 に達する"
+meaning   = "Mean same-color neighbor ratio across all agents. It is near the group proportion (≈0.5) under random placement and reaches 0.6–0.9 at convergence."
 unit      = "ratio"
 direction = "none"
 range     = [0.0, 1.0]
 scope     = ["run"]
 
 [metrics."avg_same_ratio_a"]
-meaning   = "群 A に限った同色近傍率の平均．群間で分居の強さが非対称かを見る"
+meaning   = "Mean same-color neighbor ratio for group A. Indicates whether segregation strength is asymmetric between groups."
 unit      = "ratio"
 direction = "none"
 range     = [0.0, 1.0]
 scope     = ["run"]
 
 [metrics."avg_same_ratio_b"]
-meaning   = "群 B に限った同色近傍率の平均"
+meaning   = "Mean same-color neighbor ratio for group B."
 unit      = "ratio"
 direction = "none"
 range     = [0.0, 1.0]
 scope     = ["run"]
 
 [metrics."pct_no_opposite"]
-meaning   = "異色の近傍を 1 体も持たないエージェントの割合．同色だけに囲まれた塊がどれだけできたかを表す"
+meaning   = "Percentage of agents with no opposite-color neighbors. Indicates how many same-color-only clusters have formed."
 unit      = "percent"
 direction = "none"
 range     = [0.0, 100.0]
 scope     = ["run"]
 
 [metrics."dissimilarity_index"]
-meaning   = "非類似度指数 D (簡約版)．格子全体を 1 区画として D = 0.5 × |a/A − b/B|．群の大きさが等しければ ≈0"
+meaning   = "Simplified dissimilarity index D, treating the entire grid as one area: D = 0.5 × |a/A − b/B|. It is ≈0 when the groups are equal in size."
 unit      = "ratio"
 direction = "none"
 range     = [0.0, 0.5]
 scope     = ["run"]
 
 [metrics."n_dissatisfied"]
-meaning   = "ステップ開始時に不満と判定されたエージェントの数．0 になった時点が収束である"
+meaning   = "Number of agents classified as dissatisfied at the start of the step. Convergence occurs when this reaches 0."
 unit      = "count"
 direction = "none"
 scope     = ["run"]
 
 [metrics."n_moved"]
-meaning   = "そのステップで実際に移動したエージェントの数．移動先が見つからず 0 になると停止する"
+meaning   = "Number of agents that actually moved during the step. The simulation stops if this reaches 0 because no destination can be found."
 unit      = "count"
 direction = "none"
 scope     = ["run"]
 
 [metrics."converged"]
-meaning   = "収束して終わったなら 1，打ち切りなら 0．不満者が 0 になることが収束の定義"
+meaning   = "1 if the simulation ended by convergence, or 0 if it was truncated. Convergence means that no dissatisfied agents remain."
 unit      = "boolean"
 direction = "none"
 range     = [0.0, 1.0]
 scope     = ["run"]
 
 [metrics."final_iteration"]
-meaning   = "停止したときのステップ数"
+meaning   = "Number of steps completed when the simulation stopped."
 unit      = "count"
 direction = "none"
 scope     = ["run"]
 
-# --- 条件（parameters）の説明 -----------------------------------------------
+# --- Descriptions of conditions (parameters) ---------------------------------
 #
-# 鍵は JSON ポインタ．`config.json` の `/parameters` からの相対で指す．
+# Keys are JSON Pointers relative to `/parameters` in `config.json`.
 
 [parameters."/rows"]
-meaning = "格子の行数"
+meaning = "Number of grid rows."
 unit    = "count"
 
 [parameters."/cols"]
-meaning = "格子の列数"
+meaning = "Number of grid columns."
 unit    = "count"
 
 [parameters."/n_a"]
-meaning = "群 A のエージェント数（0 を渡すと格子と空き地率から自動で決まる）"
+meaning = "Number of agents in group A (0 selects a value automatically from the grid size and vacancy rate)."
 unit    = "count"
 
 [parameters."/n_b"]
-meaning = "群 B のエージェント数"
+meaning = "Number of agents in group B."
 unit    = "count"
 
 [parameters."/n_vacant"]
-meaning = "空きセルの数．移動先はここからしか選べないので，分居がどこまで進むかを左右する"
+meaning = "Number of vacant cells. Because agents can move only to these cells, this affects how far segregation can progress."
 unit    = "count"
 
 [parameters."/vacant_rate"]
-meaning = "空き地率．n_a / n_b を自動で決めるときの入力"
+meaning = "Vacancy rate used to determine n_a and n_b automatically."
 range   = [0.0, 1.0]
 
 [parameters."/threshold"]
-meaning = "許容限界 τ．同色近傍がこの比率を下回ると不満になる（`--rule` を省いたときの ratio ルールの入力）"
+meaning = "Tolerance limit τ. An agent is dissatisfied when its same-color neighbor ratio is below this value (input to the ratio rule when `--rule` is omitted)."
 range   = [0.0, 1.0]
 
 [parameters."/rule"]
-meaning = "満足判定ルール．`ratio:X`（分離型）/ `min-same:N`（集会型，Fig.16）/ `bounded:L:H`（統合型，Fig.17）"
+meaning = "Satisfaction rule: `ratio:X` (segregation form), `min-same:N` (congregation form, Fig.16), or `bounded:L:H` (integration form, Fig.17)."
 
 [parameters."/rule_kind"]
-meaning = "上のルールの種別だけを取り出したもの（`ratio` / `min-same` / `bounded`）"
+meaning = "Rule type extracted from the rule above (`ratio`, `min-same`, or `bounded`)."
 
 [parameters."/min_same"]
-meaning = "集会型ルールの下限 N．他のルールでは意味を持たないので null"
+meaning = "Lower bound N for the congregation rule; null because it has no meaning for other rules."
 unit    = "count"
 
 [parameters."/max_same"]
-meaning = "統合型ルールの上限．他のルールでは null"
+meaning = "Upper bound for the integration rule; null for other rules."
 unit    = "count"
 
 [parameters."/move_mode"]
-meaning = "移動の運用．`standard` は不満足者だけが動く緩運用，`strict` は満足者も同色比率を厳密に改善できる空きへ投機的に動く（Fig.8）"
+meaning = "Movement mode. `standard` is a loose mode in which only dissatisfied agents move; in `strict`, satisfied agents may also move speculatively to a vacancy that strictly improves their same-color ratio (Fig.8)."
 
 [parameters."/move_strategy"]
-meaning = "移動先の選び方．`nearest` は最近傍で最初に満足できる空き，`best-local` は最近傍の距離帯で移動後の同色比率が最大の空き（不等数 Fig.12 の少数派クラスタ比率を改善する）"
+meaning = "Destination-selection strategy. `nearest` chooses the first satisfactory vacancy at the shortest distance; `best-local` chooses the vacancy with the highest post-move same-color ratio in the nearest distance band (improving the minority cluster ratio for unequal numbers in Fig.12)."
 
 [parameters."/max_iterations"]
-meaning = "反復の上限．収束していなくてもここで止める"
+meaning = "Maximum number of iterations; the simulation stops here even if it has not converged."
 unit    = "count"
 
 [parameters."/snapshot_interval"]
-meaning = "格子のスナップショットを何ステップごとに残すか（0 で残さない）．結果ではなく記録の量を決める"
+meaning = "Interval in steps between grid snapshots (0 disables snapshots). This controls the amount of recorded data, not the result."
 unit    = "count"
 
 [parameters."/seed"]
-meaning = "乱数種．無作為なのは初期配置と活性化順だけで，移動先の選択に乱数は使わない"
+meaning = "Random seed. Only the initial placement and activation order are random; destination selection uses no randomness."
 
 [parameters."/command"]
-meaning = "どのサブコマンドが書いた条件か"
+meaning = "Subcommand that recorded these conditions."
 
 [parameters."/seeds"]
-meaning = "sweep が回すシードの並び．親はこの列で駆動されるので単一の乱数種を持たない"
+meaning = "Sequence of seeds used by the sweep. The parent run is driven by this list and therefore has no single random seed."

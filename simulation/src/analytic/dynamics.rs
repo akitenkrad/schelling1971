@@ -1,29 +1,29 @@
-//! 動学エンジン．位相平面 $(W, B)$ 上で時間発展を行い，軌跡と収束先を返す．
+//! Dynamics engine. Evolves the system on the $(W, B)$ phase plane and returns the trajectory and convergence destination.
 //!
-//! 2つの実装を提供する:
-//! - [`FlowModel::Continuous`]: 連続時間 ODE．$\dot W, \dot B$ の符号は領域分類で決まり，
-//!   大きさは流速係数 $k_W, k_B$ と現在地から目標反応曲線への距離に比例．Euler 法で離散化．
-//! - [`FlowModel::DiscreteBatch`]: 各ステップで超過分を一括退出 / 余裕分を一括流入させる
-//!   論文の物語的記述に近い形式．
+//! Provides two implementations:
+//! - [`FlowModel::Continuous`]: Continuous-time ODE. The signs of $\dot W, \dot B$ are determined by the region classification,
+//!   and their magnitudes are proportional to the flow coefficients $k_W, k_B$ and the distance from the current point to the target reaction curve. Discretized by the Euler method.
+//! - [`FlowModel::DiscreteBatch`]: At each step, all excess agents exit and all available capacity is filled in one batch,
+//!   a formulation close to the narrative description in the paper.
 
 use serde::{Deserialize, Serialize};
 
 use super::phase::{Equilibrium, EquilibriumKind, PhaseConfig};
 use super::reaction::ReactionCurve;
 
-/// 流速モデル．
+/// Flow model.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum FlowModel {
-    /// 連続時間 Euler．現在地から反応曲線までの「距離」に比例する流速．
-    /// $\dot W = k_W \cdot \text{sign}(B_W(W) - B) \cdot |B_W(W) - B|^{0+}$ 等．
-    /// 簡略化: 距離そのものを流速とし，$\dot W = k_W \cdot \text{sign}_W \cdot |\text{distance}|$．
+    /// Continuous-time Euler method. Flow rate is proportional to the "distance" from the current point to the reaction curve.
+    /// For example, $\dot W = k_W \cdot \text{sign}(B_W(W) - B) \cdot |B_W(W) - B|^{0+}$.
+    /// Simplification: use the distance itself as the flow rate, with $\dot W = k_W \cdot \text{sign}_W \cdot |\text{distance}|$.
     Continuous { k_w: f64, k_b: f64, dt: f64 },
 
-    /// 離散バッチ．各ステップで:
-    /// - $B > B_W(W)$ なら，許容できなくなった W を超過分一括退出．
-    /// - $W \le W_B(B)$ かつ余裕があれば，外部の W を流入．
-    /// - B についても対称．
+    /// Discrete batch. At each step:
+    /// - If $B > B_W(W)$, all excess W agents who can no longer tolerate the composition exit.
+    /// - If $W \le W_B(B)$ and capacity is available, external W agents enter.
+    /// - Symmetrically for B.
     DiscreteBatch,
 }
 
@@ -37,20 +37,20 @@ impl Default for FlowModel {
     }
 }
 
-/// 動学設定．
+/// Dynamics configuration.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct DynamicsConfig {
     pub flow: FlowModel,
     pub max_steps: usize,
-    /// 収束判定: **速度** $\|(\dot W, \dot B)\|_\infty = \|(\Delta W, \Delta B)\|_\infty / dt
-    /// < \text{convergence\_tol}$．
+    /// Convergence criterion: **speed** $\|(\dot W, \dot B)\|_\infty = \|(\Delta W, \Delta B)\|_\infty / dt
+    /// < \text{convergence\_tol}$.
     ///
-    /// 1ステップの変位 $\|(\Delta W, \Delta B)\|_\infty$ そのものと比較してはならない．
-    /// 変位は $dt$ に比例するため，$dt$ を細かくするほど閾値を下回りやすくなり，
-    /// **時間刻みを精緻化するほど誤って「収束」と判定される** ためである
-    /// (例: 縮退ケース fig20 を初期値 $(68.67, 64.67)$ から回すと，$dt = 0.1$ では
-    /// 正しく全W 端点へティッピングするのに，$dt = 0.01$ では初期値からほとんど
-    /// 動かないまま収束扱いになっていた)．速度で判定すれば $dt$ 非依存になる．
+    /// Do not compare against the one-step displacement $\|(\Delta W, \Delta B)\|_\infty$ itself.
+    /// Because displacement is proportional to $dt$, reducing $dt$ makes it more likely to fall below the threshold,
+    /// so **refining the time step would incorrectly make the system appear "converged"**
+    /// (for example, when running the degenerate fig20 case from $(68.67, 64.67)$, $dt = 0.1$
+    /// correctly tips to the all-W endpoint, whereas $dt = 0.01$ was treated as converged after
+    /// barely moving from the initial value). Using speed makes the criterion independent of $dt$.
     pub convergence_tol: f64,
 }
 
@@ -64,7 +64,7 @@ impl Default for DynamicsConfig {
     }
 }
 
-/// 軌跡: 各時刻における $(W, B)$ の履歴．
+/// Trajectory: history of $(W, B)$ at each time point.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Trajectory {
     pub history: Vec<TrajectoryPoint>,
@@ -80,16 +80,16 @@ pub struct TrajectoryPoint {
     pub b: f64,
 }
 
-/// 初期値 $(W_0, B_0)$ から動学積分を行う．
+/// Integrates the dynamics from the initial value $(W_0, B_0)$.
 pub fn integrate(phase: &PhaseConfig, cfg: &DynamicsConfig, init: (f64, f64)) -> Trajectory {
     integrate_observed(phase, cfg, init, |_| {})
 }
 
-/// [`integrate`] と同じ計算を行い，1 ステップごとに `on_step` を 1 回呼ぶ．
+/// Performs the same computation as [`integrate`] and calls `on_step` once per step.
 ///
-/// 引数はステップ番号 (0 始まり)．`--max-steps` は上限であって到達点ではない
-/// (収束すると `break` する) ので，これを分母にした有界ステージは «確信をもって
-/// 間違った» 残り時間を出す．呼び出し側は無界ステージで数えること．
+/// The argument is the zero-based step number. `--max-steps` is an upper bound, not a destination
+/// (the loop `break`s on convergence), so a bounded stage using it as the denominator gives a
+/// confidently wrong remaining time. The caller should count using an unbounded stage.
 pub fn integrate_observed(
     phase: &PhaseConfig,
     cfg: &DynamicsConfig,
@@ -114,7 +114,7 @@ pub fn integrate_observed(
         let w_next = (w + dw).clamp(0.0, w_max);
         let b_next = (b + db).clamp(0.0, b_max);
 
-        // 容量制約．超過した場合は比例配分でクリップ．
+        // Capacity constraint. If exceeded, clip by proportional allocation.
         let (w_next, b_next) = if let Some(c) = phase.capacity {
             if w_next + b_next > c {
                 let scale = c / (w_next + b_next);
@@ -127,7 +127,7 @@ pub fn integrate_observed(
         };
 
         let delta = (w_next - w).abs().max((b_next - b).abs());
-        // 変位ではなく速度で判定する ($dt$ 非依存にするため．[`DynamicsConfig`] 参照)．
+        // Use speed rather than displacement for the criterion (to make it independent of $dt$; see [`DynamicsConfig`]).
         let speed = delta / dt;
         w = w_next;
         b = b_next;
@@ -152,18 +152,18 @@ pub fn integrate_observed(
     }
 }
 
-/// 1ステップの $(\dot W \cdot dt, \dot B \cdot dt, dt)$ を返す．
+/// Returns $(\dot W \cdot dt, \dot B \cdot dt, dt)$ for one step.
 ///
-/// 動学の解釈 (Schelling 1971 §3):
-/// 反応曲線 $B_W(W)$ の上で「満足区間」 $W \in [W_{lower}(B), W_{upper}(B)]$ を定める．
-/// 区間内なら最も寛容な外部 W が流入し，区間上限 $W_{upper}$ へ漸近する．
-/// 区間外（下側＝過少人口で異色比過多 / 上側＝過剰人口で許容限界違反）なら退出する：
-/// - $W < W_{lower}$: 0 へ向かう (満足にできるほど W が増えない / 過少すぎ)．
-/// - $W > W_{upper}$: $W_{upper}$ へ向かう (過剰分が退出)．
-/// - 反応曲線頂点を $B$ が超える場合: $W$ は全退出 → 0．
+/// Interpretation of the dynamics (Schelling 1971 §3):
+/// Define a "satisfaction interval" $W \in [W_{lower}(B), W_{upper}(B)]$ on the reaction curve $B_W(W)$.
+/// Within the interval, the most tolerant external W agents enter, approaching the upper bound $W_{upper}$.
+/// Outside the interval (below = too few agents and too high an out-group ratio / above = too many agents and a tolerance-limit violation), agents exit:
+/// - $W < W_{lower}$: move toward 0 (W cannot increase enough to achieve satisfaction / far too few).
+/// - $W > W_{upper}$: move toward $W_{upper}$ (the excess exits).
+/// - If $B$ exceeds the peak of the reaction curve: all W agents exit → 0.
 ///
-/// この形式により: (i) 端点均衡には漸近接近で安定収束，(ii) 反応曲線交差点 (混合均衡)
-/// には双方向から滑らかに収束 (chattering なし)，(iii) 鞍点は線形化で不安定．
+/// This formulation yields: (i) stable convergence to endpoint equilibria by asymptotic approach, (ii) smooth convergence
+/// to reaction-curve intersections (mixed equilibria) from both directions without chattering, and (iii) saddle points that are unstable under linearization.
 fn step_velocity(phase: &PhaseConfig, flow: FlowModel, w: f64, b: f64) -> (f64, f64, f64) {
     let w_pop_max = phase.w_schedule.pop_max();
     let b_pop_max = phase.b_schedule.pop_max();
@@ -177,38 +177,38 @@ fn step_velocity(phase: &PhaseConfig, flow: FlowModel, w: f64, b: f64) -> (f64, 
             (dw, db, dt)
         }
         FlowModel::DiscreteBatch => {
-            // 1ステップで目標値に直接ジャンプ．
+            // Jump directly to the target value in one step.
             (w_target - w, b_target - b, 1.0)
         }
     }
 }
 
-/// 動学の到達目標．
-/// `own_now` の位置と「満足区間」 $[W_{lower}, W_{upper}]$ の関係で行き先が決まる．
+/// Target of the dynamics.
+/// The destination is determined by the relationship between `own_now` and the "satisfaction interval" $[W_{lower}, W_{upper}]$.
 fn directional_target(rc: &ReactionCurve, other_now: f64, own_now: f64, own_pop_max: f64) -> f64 {
-    // other_now <= 0 なら制約なし → 全人口へ向かう
+    // If other_now <= 0, there is no constraint → move toward the full population.
     if other_now <= 0.0 {
         return own_pop_max;
     }
     let (w_peak, b_peak) = rc.peak();
     if other_now > b_peak {
-        // 反応曲線頂点を超える対色数 → どの W でも満足できない → 全退出
+        // Out-group population above the reaction-curve peak → no W level can be satisfactory → all exit.
         return 0.0;
     }
     let upper = upper_root(rc, other_now, own_pop_max, w_peak);
     let lower = lower_root(rc, other_now, w_peak);
     if own_now < lower {
-        // 満足区間より下側 → 過少 / 過密ratio で全員不満足 → 0 へ
+        // Below the satisfaction interval → too few / overcrowded ratio makes everyone dissatisfied → move toward 0.
         0.0
     } else {
-        // 区間内または上側 → 上限 W_upper へ向かう
-        // 区間内: 流入で増加して W_upper に至る．
-        // 区間上側: 過剰分退出で W_upper まで戻る．
+        // Within or above the interval → move toward the upper bound W_upper.
+        // Within the interval: entry increases the population to W_upper.
+        // Above the interval: excess agents exit until the population returns to W_upper.
         upper
     }
 }
 
-/// 反応曲線 $rc(W) = \text{target}$ を満たす上側根 (頂点より右側の解)．
+/// Upper root satisfying the reaction curve $rc(W) = \text{target}$ (the solution to the right of the peak).
 fn upper_root(rc: &ReactionCurve, target: f64, pop_max: f64, w_peak: f64) -> f64 {
     let mut lo = w_peak;
     let mut hi = pop_max;
@@ -229,7 +229,7 @@ fn upper_root(rc: &ReactionCurve, target: f64, pop_max: f64, w_peak: f64) -> f64
     lo
 }
 
-/// 反応曲線 $rc(W) = \text{target}$ を満たす下側根 (頂点より左側の解)．
+/// Lower root satisfying the reaction curve $rc(W) = \text{target}$ (the solution to the left of the peak).
 fn lower_root(rc: &ReactionCurve, target: f64, w_peak: f64) -> f64 {
     let mut lo = 0.0;
     let mut hi = w_peak;
@@ -250,7 +250,7 @@ fn lower_root(rc: &ReactionCurve, target: f64, w_peak: f64) -> f64 {
     hi
 }
 
-/// 終点に最も近い平衡点を返す．
+/// Returns the equilibrium nearest to the endpoint.
 fn nearest_equilibrium(phase: &PhaseConfig, w: f64, b: f64) -> Option<Equilibrium> {
     let eqs = phase.equilibria();
     let scale = (phase.w_schedule.pop_max() + phase.b_schedule.pop_max()).max(1.0);
@@ -260,11 +260,11 @@ fn nearest_equilibrium(phase: &PhaseConfig, w: f64, b: f64) -> Option<Equilibriu
             (d2, e)
         })
         .min_by(|a, b| a.0.partial_cmp(&b.0).unwrap())
-        .filter(|(d2, _)| d2.sqrt() < 0.05 * scale) // 5%以内
+        .filter(|(d2, _)| d2.sqrt() < 0.05 * scale) // Within 5%.
         .map(|(_, e)| e)
 }
 
-/// 初期条件グリッドを掃いて吸引域マップを構築する．
+/// Sweeps a grid of initial conditions to construct a basin-of-attraction map.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BasinSample {
     pub w0: f64,
@@ -276,8 +276,7 @@ pub struct BasinSample {
     pub steps: usize,
 }
 
-// 観測なしの入口．テストが使う (バイナリクレートなので `cargo build` からは
-// 使われていないように見える)．
+// Unobserved entry point used by tests (because this is a binary crate, it appears unused to `cargo build`).
 #[allow(dead_code)]
 pub fn basin_of_attraction(
     phase: &PhaseConfig,
@@ -288,12 +287,12 @@ pub fn basin_of_attraction(
     basin_of_attraction_observed(phase, cfg, n_w, n_b, || {})
 }
 
-/// [`basin_of_attraction`] と同じ計算を行い，初期条件 1 点ごとに `on_sample` を
-/// 1 回呼ぶ．
+/// Performs the same computation as [`basin_of_attraction`] and calls `on_sample` once
+/// for each initial condition.
 ///
-/// 容量制約の外にあって積分しなかった点でも呼ぶ — 数えているのは «試した条件»
-/// であり，格子点の総数 `(n_w + 1) * (n_b + 1)` を分母にした有界ステージが
-/// ちょうど 100% で閉じるのはそのためである．
+/// It is called even for points outside the capacity constraint that were not integrated—the count
+/// represents attempted conditions. This is why a bounded stage using the total number of grid points
+/// `(n_w + 1) * (n_b + 1)` as its denominator closes at exactly 100%.
 pub fn basin_of_attraction_observed(
     phase: &PhaseConfig,
     cfg: &DynamicsConfig,
@@ -308,7 +307,7 @@ pub fn basin_of_attraction_observed(
         for j in 0..=n_b {
             let w0 = w_max * (i as f64) / (n_w as f64);
             let b0 = b_max * (j as f64) / (n_b as f64);
-            // `continue` で観測を飛ばさないよう，棄却は if の中に閉じ込める．
+            // Keep rejection inside the if block so `continue` does not skip observation.
             if phase.within_capacity(w0, b0) {
                 let traj = integrate(phase, cfg, (w0, b0));
                 let last = traj.history.last().copied().unwrap_or(TrajectoryPoint {
@@ -351,23 +350,23 @@ mod tests {
         }
     }
 
-    /// Fig.18: 初期 (90, 5) は全W 端点に収束するはず (B が圧倒的少数)．
+    /// Fig.18: Initial state (90, 5) should converge to the all-W endpoint (B is an overwhelming minority).
     #[test]
     fn fig18_high_white_converges_to_all_white() {
         let phase = fig18_phase();
         let cfg = DynamicsConfig::default();
         let traj = integrate(&phase, &cfg, (90.0, 5.0));
-        assert!(traj.converged, "収束すべき");
+        assert!(traj.converged, "trajectory should converge");
         let last = traj.history.last().unwrap();
-        assert!(last.w > 80.0, "全W 端点付近に到達: w={}", last.w);
-        assert!(last.b < 5.0, "B はほぼゼロ: b={}", last.b);
+        assert!(last.w > 80.0, "reaches the all-W endpoint: w={}", last.w);
+        assert!(last.b < 5.0, "B is nearly zero: b={}", last.b);
         assert_eq!(
             traj.final_equilibrium.map(|e| e.kind),
             Some(EquilibriumKind::AllWhite)
         );
     }
 
-    /// Fig.18: 初期 (5, 40) は全B 端点に収束するはず (W が圧倒的少数)．
+    /// Fig.18: Initial state (5, 40) should converge to the all-B endpoint (W is an overwhelming minority).
     #[test]
     fn fig18_high_black_converges_to_all_black() {
         let phase = fig18_phase();
@@ -375,16 +374,16 @@ mod tests {
         let traj = integrate(&phase, &cfg, (5.0, 40.0));
         assert!(traj.converged);
         let last = traj.history.last().unwrap();
-        assert!(last.b > 40.0, "全B 端点付近に到達: b={}", last.b);
-        assert!(last.w < 5.0, "W はほぼゼロ: w={}", last.w);
+        assert!(last.b > 40.0, "reaches the all-B endpoint: b={}", last.b);
+        assert!(last.w < 5.0, "W is nearly zero: w={}", last.w);
         assert_eq!(
             traj.final_equilibrium.map(|e| e.kind),
             Some(EquilibriumKind::AllBlack)
         );
     }
 
-    /// 直線型の対称ケース: 初期条件を変えるとどちらかの端点に振れるが，
-    /// 直線型では Schelling のいう「混合は静的には可能だが動的に不安定」が成立する．
+    /// Symmetric linear case: changing the initial conditions leads to one endpoint or the other,
+    /// while the linear form exhibits Schelling's "mixing is statically possible but dynamically unstable" result.
     #[test]
     fn discrete_batch_converges_in_few_steps() {
         let phase = fig18_phase();
@@ -394,11 +393,11 @@ mod tests {
             convergence_tol: 1e-3,
         };
         let traj = integrate(&phase, &cfg, (50.0, 25.0));
-        // バッチ型は1〜数ステップで端点に到達するはず
+        // The batch model should reach an endpoint in one to several steps.
         assert!(traj.history.len() <= 10);
     }
 
-    /// 容量制約を入れたケース: capacity を超えない．
+    /// Case with a capacity constraint: capacity is never exceeded.
     #[test]
     fn capacity_constraint_respected() {
         let phase = PhaseConfig {
@@ -415,16 +414,20 @@ mod tests {
         let cfg = DynamicsConfig::default();
         let traj = integrate(&phase, &cfg, (60.0, 50.0));
         for p in &traj.history {
-            assert!(p.w + p.b <= 120.0 + 1e-6, "容量超過: w+b={}", p.w + p.b);
+            assert!(
+                p.w + p.b <= 120.0 + 1e-6,
+                "capacity exceeded: w+b={}",
+                p.w + p.b
+            );
         }
     }
 
-    /// 収束判定が時間刻み $dt$ に依存しないこと．
+    /// The convergence criterion must not depend on the time step $dt$.
     ///
-    /// 収束判定を1ステップ変位で行うと，変位が $dt$ に比例するために
-    /// $dt$ を細かくするほど誤って収束と判定されてしまう (時間刻みを精緻化するほど
-    /// 結果が悪化する)．縮退ケース (fig20 相当，$R_{\max} = 3$) は3次項による発散が
-    /// 遅く，このバグが最も顕在化するので回帰テストの題材に使う．
+    /// If convergence is judged by one-step displacement, the displacement's proportionality to $dt$
+    /// causes smaller $dt$ values to be incorrectly classified as converged (refining the time step
+    /// makes the result worse). The degenerate case (equivalent to fig20, $R_{\max} = 3$) diverges slowly
+    /// due to the cubic term and exposes this bug most clearly, so it is used as a regression test.
     #[test]
     fn convergence_verdict_is_independent_of_dt() {
         let phase = PhaseConfig {
@@ -439,7 +442,7 @@ mod tests {
             capacity: None,
         };
         let w_star = 200.0 / 3.0;
-        let init = (w_star + 2.0, w_star - 2.0); // v = 4 の非対称摂動
+        let init = (w_star + 2.0, w_star - 2.0); // Asymmetric perturbation with v = 4.
 
         for dt in [0.1, 0.01, 0.001] {
             let cfg = DynamicsConfig {
@@ -455,27 +458,30 @@ mod tests {
             let last = traj.history.last().unwrap();
             assert!(
                 last.w > 95.0 && last.b < 5.0,
-                "dt={dt} でも全W 端点へティッピングする: ({}, {})",
+                "tips to the all-W endpoint even with dt={dt}: ({}, {})",
                 last.w,
                 last.b
             );
         }
     }
 
-    /// 吸引域: 4 隅サンプルで適切に分類される．
+    /// Basin of attraction: the four corner samples are classified correctly.
     #[test]
     fn basin_sample_identifies_endpoints() {
         let phase = fig18_phase();
         let cfg = DynamicsConfig::default();
         let basin = basin_of_attraction(&phase, &cfg, 4, 4);
         assert!(!basin.is_empty());
-        // 少なくとも1点が AllWhite に，1点が AllBlack に収束する
+        // At least one point converges to AllWhite and one to AllBlack.
         let has_white = basin
             .iter()
             .any(|s| s.converged_kind == Some(EquilibriumKind::AllWhite));
         let has_black = basin
             .iter()
             .any(|s| s.converged_kind == Some(EquilibriumKind::AllBlack));
-        assert!(has_white && has_black, "両端点への吸引域が観測されること");
+        assert!(
+            has_white && has_black,
+            "basins of attraction for both endpoints should be observed"
+        );
     }
 }

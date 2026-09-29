@@ -1,18 +1,17 @@
-//! runvault への記録の共通部分．
+//! Shared runvault recording logic.
 //!
-//! 論文メタデータ (research) は `run` / `sweep` / `bnm` / `bnm-basin` / `tipping`
-//! のどのサブコマンドでも同一なので，ここ 1 箇所で組み立てる．
+//! Paper metadata (research) is identical for the `run`, `sweep`, `bnm`, `bnm-basin`, and
+//! `tipping` subcommands, so it is assembled in one place here.
 
 use runvault::{Replication, Run, Target, Work};
 
 use crate::metrics::Metrics;
 use crate::simulation::SimulationResult;
 
-/// この再現実験が対象としている論文．
+/// The paper targeted by this replication study.
 ///
-/// `bnm` / `bnm-basin` / `tipping` がどの図を再現するかは `--preset` で決まり，
-/// サブコマンド名からは決まらないため，`Target::figure` はここでは付けない
-/// (claim だけを共通の対象として持つ)．
+/// Which figure `bnm` / `bnm-basin` / `tipping` reproduces is determined by `--preset`, not by
+/// the subcommand name, so `Target::figure` is not set here (only the claim is shared as a target).
 pub fn replication() -> Replication {
     Work::doi("10.1080/0022250X.1971.9989794")
         .title("Dynamic Models of Segregation")
@@ -25,10 +24,10 @@ pub fn replication() -> Replication {
         .obsidian_note("研究/98_論文レポート/80-再現実験/実装完了/schelling1971/設計書.md")
 }
 
-/// シミュレーション 1 本ぶんの記録．
+/// Records one simulation run.
 ///
-/// ステップごとの 7 指標 (`step` は時間軸なので値としては書かない) と，
-/// run 全体を 1 つの値で表す `converged` / `final_iteration` を書く．
+/// Writes seven per-step metrics (`step` is the time axis and is therefore not written as a value),
+/// plus `converged` / `final_iteration`, each representing the entire run as one value.
 pub fn log_simulation(run: &mut Run, result: &SimulationResult) {
     for m in &result.metrics_history {
         log_step(run, m);
@@ -40,10 +39,10 @@ pub fn log_simulation(run: &mut Run, result: &SimulationResult) {
             ("final_iteration", result.final_iteration as f64),
         ],
     )
-    .expect("run スコープの指標の記録に失敗");
+    .expect("failed to record run-scoped metrics");
 }
 
-/// `Metrics` の 7 フィールドを 1 ステップぶんまとめて書く．
+/// Writes all seven `Metrics` fields for one step.
 fn log_step(run: &mut Run, m: &Metrics) {
     run.log_metrics_at(
         m.step as u64,
@@ -59,5 +58,5 @@ fn log_step(run: &mut Run, m: &Metrics) {
             ("avg_same_ratio_b", m.avg_same_ratio_b),
         ],
     )
-    .unwrap_or_else(|e| panic!("step {} の指標の記録に失敗: {e}", m.step));
+    .unwrap_or_else(|e| panic!("failed to record metrics for step {}: {e}", m.step));
 }

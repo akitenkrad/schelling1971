@@ -1,29 +1,29 @@
-//! socsim フレームワーク上の Schelling 移動メカニズム．
+//! Schelling movement mechanism for the socsim framework.
 //!
-//! Schelling (1971) の移動規則を socsim の [`Mechanism`] として実装する．
-//! `Decision` フェーズで発火し，[`StepContext::agent_order`](socsim_core::StepContext)
-//! が与えるアクティベーション順(= スケジューラがシャッフルした順序)に従って
-//! 各エージェントを処理する:
+//! Implements the Schelling (1971) movement rule as a socsim [`Mechanism`]. It fires in the
+//! `Decision` phase and processes each agent in the activation order supplied by
+//! [`StepContext::agent_order`](socsim_core::StepContext), i.e. the order shuffled by the scheduler:
 //!
-//! 1. 移動対象は**ステップ開始時に不満足だったエージェントのみ**(旧実装の
-//!    「不満足エージェントを収集してから処理する」セマンティクスを保つ)．
-//!    途中で他者の移動により不満足化したエージェントは当該ステップでは動かさない．
-//! 2. 対象エージェントが処理時点で既に満足していればスキップ(他者の移動で
-//!    満足化した場合)．
-//! 3. 不満足なら空きセルをチェビシェフ距離の昇順で探索し，移動後に満足できる
-//!    最初の空きセルへ移動する．
+//! 1. **Only agents dissatisfied at the start of the step** are eligible to move, preserving the
+//!    previous implementation's semantics of collecting dissatisfied agents before processing.
+//!    Agents made dissatisfied by another agent's move during the step do not move in that step.
+//! 2. An eligible agent is skipped if it is already satisfied when processed, for example because
+//!    another agent's move satisfied it.
+//! 3. If dissatisfied, it searches vacant cells in ascending Chebyshev distance and moves to the
+//!    first cell where it would be satisfied.
 //!
-//! これにより `n_moved <= n_dissatisfied(ステップ開始時)` が保たれる．
+//! This preserves `n_moved <= n_dissatisfied(at the start of the step)`.
 //!
-//! 移動先選択に乱数は使わない(最近傍貪欲)．ランダム性はアクティベーション順序の
-//! シャッフルのみに由来する(`RandomActivationScheduler`)．`agent_order` は全
-//! エージェントのシャッフルだが，開始時不満足集合でフィルタするため，旧実装が
-//! 不満足ベクタを直接シャッフルしたのと統計的に等価な処理順となる．
+//! Destination selection uses no randomness (greedy nearest-neighbor search). Randomness comes
+//! only from shuffling the activation order (`RandomActivationScheduler`). Although `agent_order`
+//! shuffles all agents, filtering it by the set dissatisfied at the start produces an order
+//! statistically equivalent to the previous implementation's direct shuffle of that set.
 //!
-//! ステップ結果(移動数・開始時不満足数・収束フラグ)は [`StepContext::scratch`] に
-//! 書き込み，ドライバが [`Simulation::scratch`](socsim_engine::Simulation::scratch)
-//! 経由で読み取る．収束(開始時不満足が空)または行き詰まり(`n_moved == 0`)を検知
-//! したら [`StepContext::request_stop`] でエンジンに停止を要求する．
+//! Step results (number moved, number dissatisfied at the start, and convergence flag) are written
+//! to [`StepContext::scratch`] and read by the driver through
+//! [`Simulation::scratch`](socsim_engine::Simulation::scratch). On detecting convergence (none
+//! dissatisfied at the start) or deadlock (`n_moved == 0`), the mechanism requests engine
+//! termination through [`StepContext::request_stop`].
 
 use std::cell::RefCell;
 use std::collections::HashSet;
@@ -34,32 +34,31 @@ use socsim_core::{AgentId, Mechanism, Phase, Result, StepContext};
 use crate::config::MoveMode;
 use crate::world::SchellingWorld;
 
-/// エージェント 1 体の移動判断ごとに 1 回呼ばれる観測子．
+/// Observer called once for each movement decision for one agent.
 ///
-/// 時間が入っているのはステップではなく **1 体の移動判断** である．不満足な
-/// エージェントは空きセルをチェビシェフ距離の昇順に走査するので，1 判断の費用は
-/// グリッドの広さに比例して伸びる．実測: 400x400 の `run` は 70.6 秒で，収束まで
-/// わずか 8 ステップ (1 ステップ 8.8 秒)．600x600 は 20 分を超えても終わらず，
-/// 1 ステップが分の単位に入る．ステップ単位で数えると，その間ずっと数字が
-/// 動かない．
+/// Time is spent on **individual movement decisions**, not steps. Because each dissatisfied agent
+/// scans vacant cells in ascending Chebyshev distance, the cost of one decision grows with grid
+/// area. Measurements: a 400x400 `run` took 70.6 seconds but only 8 steps to converge (8.8 seconds
+/// per step). A 600x600 run did not finish after 20 minutes, with each step taking minutes. A
+/// step-based counter therefore remains unchanged throughout that time.
 ///
-/// 借用ではなく共有にしてあるのは，メカニズムが `Box<dyn Mechanism<_>>` として
-/// エンジンに入る (= `'static`) ため，呼び出し側の `Stage` を借用できないから．
+/// This is shared rather than borrowed because the mechanism enters the engine as a
+/// `Box<dyn Mechanism<_>>` (= `'static`) and therefore cannot borrow the caller's `Stage`.
 pub type DecisionObserver = Rc<RefCell<dyn FnMut()>>;
 
-/// 何も数えない観測子 (進捗を報告しない呼び出し側用)．
+/// Observer that counts nothing, for callers that do not report progress.
 pub fn no_observer() -> DecisionObserver {
     Rc::new(RefCell::new(|| {}))
 }
 
-/// 不満足エージェントを最近傍の満足できる空きセルへ移動させるメカニズム．
+/// Mechanism that moves dissatisfied agents to the nearest satisfactory vacant cell.
 pub struct SchellingMoveMechanism {
-    /// 移動判断 1 件ごとに呼ぶ観測子．
+    /// Observer called for each movement decision.
     on_decision: DecisionObserver,
 }
 
 impl SchellingMoveMechanism {
-    /// 観測子つきで組み立てる．進捗を報告しない場合は [`no_observer`] を渡す．
+    /// Constructs the mechanism with an observer. Pass [`no_observer`] when not reporting progress.
     pub fn new(on_decision: DecisionObserver) -> Self {
         Self { on_decision }
     }
@@ -75,13 +74,13 @@ impl Mechanism<SchellingWorld> for SchellingMoveMechanism {
     }
 
     fn apply(&mut self, _phase: Phase, ctx: &mut StepContext<'_, SchellingWorld>) -> Result<()> {
-        // 近隣走査用の再利用バッファ(満足判定のホットパスからヒープ確保を排除する)．
-        // `neighbors_into` は `neighbors` と同一順序の近隣を埋めるため，満足判定・
-        // 移動先選択(ひいては結果)はいずれも不変．
+        // Reusable neighbor-scan buffer, eliminating heap allocation from the satisfaction hot path.
+        // `neighbors_into` fills neighbors in the same order as `neighbors`, so satisfaction checks,
+        // destination selection, and therefore results are unchanged.
         let mut buf: Vec<(usize, usize)> = Vec::new();
 
-        // ステップ開始時に不満足なエージェント集合をスナップショットする．
-        // 当該ステップで移動できるのはこの集合のメンバーのみ．
+        // Snapshot the agents dissatisfied at the start of the step.
+        // Only members of this set may move during this step.
         let dissatisfied: HashSet<AgentId> = ctx
             .world
             .colors
@@ -96,48 +95,49 @@ impl Mechanism<SchellingWorld> for SchellingMoveMechanism {
         let mut n_moved = 0usize;
 
         for id in ctx.agent_order {
-            // 走査した 1 体を «判断 1 件» として先に数える．以降の `continue` が
-            // 観測を飛ばさないよう，ループ本体の先頭に置く．
+            // Count each scanned agent as one decision first. Keep this at the top of the loop so
+            // subsequent `continue` statements cannot skip the observation.
             (self.on_decision.borrow_mut())();
 
-            // 開始時に満足していたエージェントは当該ステップでは動かさない．
+            // Agents satisfied at the start do not move during this step.
             if !dissatisfied.contains(id) {
                 continue;
             }
 
-            // 現在位置を取得．
+            // Get the current position.
             let (r, c) = match ctx.world.index.position(*id) {
                 Some(pos) => pos,
-                None => continue, // 念のため(常に存在するはず)
+                None => continue, // Defensive fallback; the position should always exist.
             };
 
-            // 他者の移動で既に満足していればスキップ．
+            // Skip agents already satisfied by another agent's move.
             if ctx.world.is_satisfied_buf(r, c, &mut buf) {
                 continue;
             }
 
-            // 空きセルを最近傍順に探索し，満足できる最初のセルへ移動．
+            // Search vacant cells nearest first and move to the first satisfactory one.
             if let Some(v) = ctx.world.nearest_satisfying_vacant((r, c)) {
                 ctx.world
                     .index
                     .move_to(*id, v.0, v.1)
-                    .expect("空きセルへの移動に失敗");
+                    .expect("failed to move to vacant cell");
                 n_moved += 1;
             }
         }
 
-        // 厳格運用 (Fig.8): 満足者も「同色比率を厳密に改善できる」空きセルへ投機的に
-        // 移動する．対象はステップ開始時に満足していたエージェントのみ(当該ステップで
-        // 不満足者の移動により満足化した者は次ステップまで動かさない)．処理時点で
-        // 不満足化していればスキップする(緩運用の対象になりうるが当該ステップでは不可)．
+        // Strict mode (Fig.8): satisfied agents also move speculatively to vacant cells that strictly
+        // improve their same-color ratio. Only agents satisfied at the start of the step are eligible;
+        // those satisfied by a dissatisfied agent's move wait until the next step. Skip an agent if it
+        // has become dissatisfied by the time it is processed (it may qualify for a standard move,
+        // but not during this step).
         let mut n_speculative = 0usize;
         if ctx.world.move_mode == MoveMode::Strict {
             for id in ctx.agent_order {
-                // 投機の走査も同じく 1 体 1 件として数える (厳格運用では 1 ステップ
-                // あたりの判断数が緩運用のおよそ 2 倍になる)．
+                // Count each speculative scan as one decision as well. Strict mode makes roughly
+                // twice as many decisions per step as standard mode.
                 (self.on_decision.borrow_mut())();
 
-                // 開始時に不満足だったエージェントは投機対象外(既に上で処理済み)．
+                // Agents dissatisfied at the start are ineligible for speculation; handled above.
                 if dissatisfied.contains(id) {
                     continue;
                 }
@@ -145,7 +145,8 @@ impl Mechanism<SchellingWorld> for SchellingMoveMechanism {
                     Some(pos) => pos,
                     None => continue,
                 };
-                // 処理時点で不満足なら投機ではなく通常移動の対象(当該ステップでは動かさない)．
+                // If dissatisfied when processed, the agent needs a standard rather than speculative
+                // move and therefore does not move during this step.
                 if !ctx.world.is_satisfied_buf(r, c, &mut buf) {
                     continue;
                 }
@@ -153,7 +154,7 @@ impl Mechanism<SchellingWorld> for SchellingMoveMechanism {
                     ctx.world
                         .index
                         .move_to(*id, v.0, v.1)
-                        .expect("空きセルへの投機的移動に失敗");
+                        .expect("failed to move speculatively to vacant cell");
                     n_speculative += 1;
                 }
             }
@@ -162,18 +163,19 @@ impl Mechanism<SchellingWorld> for SchellingMoveMechanism {
         let total_moved = n_moved + n_speculative;
         let converged = dissatisfied.is_empty();
 
-        // ステップ結果を scratch に書き出す(ドライバが読む)．
-        // `n_moved` は通常移動＋投機移動の合計(緩運用では投機移動は常に 0)．
+        // Write step results to scratch for the driver to read.
+        // `n_moved` totals standard and speculative moves; speculative moves are always zero in
+        // standard mode.
         ctx.scratch.insert("n_moved", total_moved);
         ctx.scratch.insert("n_dissatisfied", dissatisfied.len());
         ctx.scratch.insert("converged", converged);
 
-        // 停止判定:
-        // - 緩運用: 収束(開始時不満足が空)または行き詰まり(移動 0)．
-        //   投機移動は常に 0 なので `total_moved == 0` は旧来の `n_moved == 0` と一致し，
-        //   挙動はビット単位で不変．
-        // - 厳格運用: 不満足移動も投機移動も発生しなくなった時点で停止(全員が満足し，
-        //   かつ誰も同色比率を改善できない安定状態)．
+        // Stopping conditions:
+        // - Standard mode: convergence (none dissatisfied at the start) or deadlock (zero moves).
+        //   Because speculative moves are always zero, `total_moved == 0` equals the former
+        //   `n_moved == 0`, preserving behavior bit for bit.
+        // - Strict mode: stop when neither dissatisfied nor speculative moves occur, a stable state
+        //   where everyone is satisfied and no one can improve their same-color ratio.
         let should_stop = match ctx.world.move_mode {
             MoveMode::Standard => converged || total_moved == 0,
             MoveMode::Strict => converged && total_moved == 0,

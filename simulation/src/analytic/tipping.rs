@@ -1,11 +1,11 @@
-//! ティッピングモデル (Schelling 1971 §4, pp.181--186)．
+//! Tipping model (Schelling 1971 §4, pp.181--186).
 //!
-//! 境界近隣モデル (BNM) を住宅市場に適用したもの．BNM の基本動学に以下を追加する:
-//! - **投機的退出 (Speculation)**: 期待値ベースの早期退出により，現在比率が許容内でも将来予測で退出．
-//! - **流速の非対称性 (FlowAsymmetry)**: 流入・退出の速度が色・方向で異なる．
-//! - **チャネリング (channeling)**: 境界明確な小規模近隣ではティッピングが集中する効果を，
-//!   実効容量の縮小として表現．
-//! - **ティッピング類型分類 (TippingType)**: in-tipping / out-tipping の有無で 4 類型に分類．
+//! Applies the bounded-neighborhood model (BNM) to the housing market. Adds the following to the basic BNM dynamics:
+//! - **Speculative exit (Speculation)**: Expectation-based early exit, allowing agents to exit based on forecasts even when the current ratio is tolerable.
+//! - **Flow-rate asymmetry (FlowAsymmetry)**: Entry and exit rates differ by group and direction.
+//! - **Channeling (channeling)**: Represents the concentration of tipping in small neighborhoods with clear boundaries
+//!   as a reduction in effective capacity.
+//! - **Tipping-type classification (TippingType)**: Classifies cases into four types based on the presence of in-tipping / out-tipping.
 
 use serde::{Deserialize, Serialize};
 
@@ -14,29 +14,29 @@ use super::phase::{EquilibriumKind, PhaseConfig};
 use super::reaction::ReactionCurve;
 
 // ---------------------------------------------------------------------------
-// 投機的退出
+// Speculative exit
 // ---------------------------------------------------------------------------
 
-/// 期待形成モデル．
+/// Expectation-formation model.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Speculation {
-    /// 投機なし．許容判定は現在比率のみ．
+    /// No speculation. Tolerance is judged using only the current ratio.
     #[default]
     None,
-    /// 線形外挿: 期待 $B_t^e = B_t + \alpha \cdot \dot B_{t-1}$．
-    /// 許容判定で $B_t$ の代わりに $B_t^e$ を使い，将来悪化を予測した早期退出を許す．
+    /// Linear extrapolation: expected $B_t^e = B_t + \alpha \cdot \dot B_{t-1}$.
+    /// Uses $B_t^e$ instead of $B_t$ for the tolerance judgment, allowing early exit when future deterioration is forecast.
     Linear { alpha: f64 },
-    /// 過去 window ステップから線形回帰で外挿．weight は 0..=1 で，
-    /// $B_t^e = B_t + \text{weight} \cdot \text{trend}$．
+    /// Extrapolates by linear regression over the previous window steps. weight is in 0..=1,
+    /// $B_t^e = B_t + \text{weight} \cdot \text{trend}$.
     Trend { window: usize, weight: f64 },
 }
 
 // ---------------------------------------------------------------------------
-// 流速非対称性
+// Flow-rate asymmetry
 // ---------------------------------------------------------------------------
 
-/// 流入・退出の速度を色・方向別に指定する．
+/// Specifies entry and exit rates by group and direction.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct FlowAsymmetry {
     pub w_inflow: f64,
@@ -57,7 +57,7 @@ impl Default for FlowAsymmetry {
 }
 
 // ---------------------------------------------------------------------------
-// ティッピング設定
+// Tipping configuration
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -66,29 +66,29 @@ pub struct TippingConfig {
     pub dynamics: DynamicsConfig,
     pub speculation: Speculation,
     pub asymmetry: Option<FlowAsymmetry>,
-    /// 実効容量を `phase.capacity * channeling` に縮小する．
-    /// None または 1.0 で無効．小さな値ほど近隣境界が明確で，ティッピングが起きやすい．
+    /// Reduces effective capacity to `phase.capacity * channeling`.
+    /// Disabled by None or 1.0. Smaller values represent clearer neighborhood boundaries and make tipping more likely.
     pub channeling: Option<f64>,
 }
 
 impl TippingConfig {
-    /// 軌跡を積分する．投機項と非対称性は dynamics::integrate ではなく専用ルーチンで処理．
+    /// Integrates the trajectory. The speculation term and asymmetry are handled by a dedicated routine rather than dynamics::integrate.
     ///
-    /// 観測なしの入口．テストが使う (バイナリクレートなので `cargo build` からは
-    /// 使われていないように見える)．
+    /// Unobserved entry point used by tests (because this is a binary crate, it appears unused to
+    /// `cargo build`).
     #[allow(dead_code)]
     pub fn integrate(&self, init: (f64, f64)) -> Trajectory {
         self.integrate_observed(init, |_| {})
     }
 
-    /// [`TippingConfig::integrate`] と同じ計算を行い，1 ステップごとに `on_step`
-    /// を 1 回呼ぶ．引数はステップ番号 (0 始まり)．
+    /// Performs the same computation as [`TippingConfig::integrate`] and calls `on_step`
+    /// once per step. The argument is the zero-based step number.
     ///
-    /// 拡張なし (投機なし・非対称なし) の経路も BNM の
-    /// [`integrate_observed`] に委ねるので，どちらの経路でも同じ粒度で数える．
+    /// The path without extensions (no speculation or asymmetry) is also delegated to BNM's
+    /// [`integrate_observed`], so both paths count at the same granularity.
     pub fn integrate_observed(&self, init: (f64, f64), on_step: impl FnMut(usize)) -> Trajectory {
-        // 現状: 投機・非対称が未指定なら BNM の積分にフォールバック．
-        // 容量制約は channeling 適用後の値を使う．
+        // Currently, fall back to BNM integration when speculation and asymmetry are unspecified.
+        // Use the capacity constraint after applying channeling.
         let mut phase = self.phase.clone();
         if let Some(c) = self.channeling {
             if (0.0..=1.0).contains(&c) {
@@ -130,24 +130,24 @@ impl TippingConfig {
         let mut converged = false;
         let mut converged_step: Option<usize> = None;
 
-        // 期待形成のための過去履歴 (window 用)
+        // Past history for expectation formation (for the window).
         let mut prev_w = w;
         let mut prev_b = b;
 
         for step in 0..self.dynamics.max_steps {
-            // 期待値 (投機モデル適用)
+            // Expected values (after applying the speculation model).
             let (b_eff, w_eff) = self.apply_speculation(&history, prev_w, prev_b, w, b);
 
-            // 反応曲線目標．不在色は実効値で評価
+            // Reaction-curve targets. Evaluate the absent group using its effective value.
             let w_target = directional_target(&phase.w_reaction(), b_eff, w, w_max);
             let b_target = directional_target(&phase.b_reaction(), w_eff, b, b_max);
 
-            // 流速 (非対称性)
+            // Flow rates (asymmetry).
             let asym = self.asymmetry.unwrap_or_default();
             let w_rate = if w_target >= w {
                 k_w * asym.w_inflow * (w_target - w)
             } else {
-                k_w * asym.w_outflow * (w_target - w) // 負の値
+                k_w * asym.w_outflow * (w_target - w) // Negative value.
             };
             let b_rate = if b_target >= b {
                 k_b * asym.b_inflow * (b_target - b)
@@ -172,8 +172,8 @@ impl TippingConfig {
             };
 
             let delta = (w_next - w).abs().max((b_next - b).abs());
-            // 変位ではなく速度で判定する ($dt$ 非依存にするため．
-            // [`super::dynamics::DynamicsConfig::convergence_tol`] 参照)．
+            // Use speed rather than displacement for the criterion (to make it independent of $dt$;
+            // see [`super::dynamics::DynamicsConfig::convergence_tol`]).
             let speed = delta / dt;
             prev_w = w;
             prev_b = b;
@@ -190,7 +190,7 @@ impl TippingConfig {
             }
         }
 
-        // 終点に最も近い平衡点 (ヘルパは dynamics 側 private なので簡易再実装)
+        // Equilibrium nearest to the endpoint (simple reimplementation because the dynamics helper is private).
         let final_eq = phase
             .equilibria()
             .into_iter()
@@ -213,8 +213,8 @@ impl TippingConfig {
         }
     }
 
-    /// 投機項により「許容判定に使う相手色の実効値」を計算する．
-    /// 戻り値は (B 効値，W 効値)．通常の BNM では (B, W) と一致．
+    /// Computes the "effective value of the other group used for the tolerance judgment" through the speculation term.
+    /// Returns (effective B value, effective W value). In the ordinary BNM, these equal (B, W).
     fn apply_speculation(
         &self,
         history: &[TrajectoryPoint],
@@ -263,7 +263,7 @@ impl TippingConfig {
     }
 }
 
-// dynamics::directional_target は private なのでここで再利用するため公開ラッパを用意
+// Provide a public wrapper for reuse here because dynamics::directional_target is private.
 fn directional_target(rc: &ReactionCurve, other_now: f64, own_now: f64, own_pop_max: f64) -> f64 {
     if other_now <= 0.0 {
         return own_pop_max;
@@ -272,7 +272,7 @@ fn directional_target(rc: &ReactionCurve, other_now: f64, own_now: f64, own_pop_
     if other_now > b_peak {
         return 0.0;
     }
-    // 上側根
+    // Upper root
     let mut lo = w_peak;
     let mut hi = own_pop_max;
     let upper = if rc.max_other(hi) >= other_now {
@@ -291,7 +291,7 @@ fn directional_target(rc: &ReactionCurve, other_now: f64, own_now: f64, own_pop_
         }
         lo
     };
-    // 下側根
+    // Lower root
     let mut lo = 0.0;
     let mut hi = w_peak;
     let lower = if rc.max_other(lo) >= other_now {
@@ -318,20 +318,20 @@ fn directional_target(rc: &ReactionCurve, other_now: f64, own_now: f64, own_pop_
 }
 
 // ---------------------------------------------------------------------------
-// ティッピング類型分類
+// Tipping-type classification
 // ---------------------------------------------------------------------------
 
-/// ティッピング類型 (Schelling Fig.30--32 の 4 類型)．
+/// Tipping types (the four types in Schelling Fig.30--32).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TippingType {
-    /// in-tipping のみ: 全W 端点が不安定で，少数派 (B) が自然流入を始める．
+    /// In-tipping only: the all-W endpoint is unstable, and the minority (B) begins entering spontaneously.
     InTippingOnly,
-    /// out-tipping のみ: 全W 端点は安定だが，B が閾値超過で W が連鎖退出する．
+    /// Out-tipping only: the all-W endpoint is stable, but W agents exit in a cascade when B exceeds the threshold.
     OutTippingOnly,
-    /// 両方: 自然流入と退出連鎖の両方が起きる (典型的ホワイトフライト)．
+    /// Both: spontaneous entry and an exit cascade both occur (typical white flight).
     Both,
-    /// 両方なし: 安定混合均衡が存在し，端点も安定．
+    /// Neither: a stable mixed equilibrium exists, and the endpoints are also stable.
     Neither,
 }
 
@@ -342,36 +342,36 @@ pub struct TippingClassification {
     pub mixed_stable_exists: bool,
 }
 
-/// 反応曲線の幾何から in/out tipping の有無を判定する．
+/// Determines the presence of in/out tipping from the geometry of the reaction curves.
 ///
-/// **In-tipping (幾何条件)**: 黒人反応曲線 $W_B(B)$ の頂点が $W_{\max}$ 以上．
-/// すなわち $\max_B W_B(B) \ge W_{\max}$．これが成り立てば，ある B 値で
-/// 「W = W_max でも B が許容できる」状態が存在し，その水準を超える B 流入が
-/// 自己持続的になる ($B$ がもう少し増えれば $W$ が減らせる)．
+/// **In-tipping (geometric condition)**: The peak of the B reaction curve $W_B(B)$ is at least $W_{\max}$.
+/// That is, $\max_B W_B(B) \ge W_{\max}$. If this holds, there is a B value at which
+/// "B can tolerate the composition even when W = W_max," and B entry beyond that level becomes
+/// self-sustaining (a little more $B$ allows $W$ to decrease).
 ///
-/// **Out-tipping**: 安定な混合均衡が**存在しない**こと．
-/// 安定混合があれば B 流入は混合均衡で止まり連鎖退出は起きない．
-/// 安定混合がなければ，B が閾値を越えると W が連鎖退出する．
+/// **Out-tipping**: A stable mixed equilibrium **does not exist**.
+/// If stable mixing exists, B entry stops at the mixed equilibrium and no exit cascade occurs.
+/// Without stable mixing, W agents exit in a cascade when B exceeds the threshold.
 pub fn classify_tipping(phase: &PhaseConfig) -> TippingClassification {
     let eqs = phase.equilibria();
 
-    // 全W 端点の安定性 (情報用: 線形化に基づく)
+    // Stability of the all-W endpoint (informational: based on linearization).
     let all_white = eqs.iter().find(|e| e.kind == EquilibriumKind::AllWhite);
     let all_white_stable = all_white
         .map(|e| e.stability == super::phase::Stability::Stable)
         .unwrap_or(true);
 
-    // 安定混合均衡の存在
+    // Existence of a stable mixed equilibrium.
     let mixed_stable_exists = eqs.iter().any(|e| {
         e.kind == EquilibriumKind::Mixed && e.stability == super::phase::Stability::Stable
     });
 
-    // 幾何 in-tipping: B 反応曲線の頂点が W_max 以上 (B が W_max を覆える経路あり)
+    // Geometric in-tipping: the B reaction-curve peak is at least W_max (there is a path along which B can cover W_max).
     let w_max = phase.w_schedule.pop_max();
     let (_, b_curve_peak_w) = phase.b_reaction().peak();
     let in_tipping = b_curve_peak_w >= w_max - 1e-9;
 
-    // 幾何 out-tipping: 安定混合がなければ B が閾値超過で W は連鎖退出
+    // Geometric out-tipping: without stable mixing, W exits in a cascade when B exceeds the threshold.
     let out_tipping = !mixed_stable_exists;
 
     let tipping_type = match (in_tipping, out_tipping) {
@@ -423,7 +423,7 @@ mod tests {
         }
     }
 
-    /// Fig.18: 全W 安定 + 混合不安定 → out-tipping のみ (B が閾値超過で W が連鎖退出)．
+    /// Fig.18: Stable all-W + unstable mixing → out-tipping only (W exits in a cascade when B exceeds the threshold).
     #[test]
     fn fig18_classifies_as_out_tipping() {
         let phase = fig18_phase();
@@ -433,7 +433,7 @@ mod tests {
         assert!(!cls.mixed_stable_exists);
     }
 
-    /// Fig.19: 全W 安定 + 安定混合あり → どちらの ティッピングもなし．
+    /// Fig.19: Stable all-W + stable mixing → neither type of tipping.
     #[test]
     fn fig19_classifies_as_neither() {
         let phase = fig19_phase();
@@ -443,7 +443,7 @@ mod tests {
         assert!(cls.mixed_stable_exists);
     }
 
-    /// 投機なし・非対称なし → BNM と同じ軌跡．
+    /// No speculation or asymmetry → the same trajectory as BNM.
     #[test]
     fn no_extensions_matches_bnm() {
         let cfg = TippingConfig {
@@ -461,7 +461,7 @@ mod tests {
         );
     }
 
-    /// 投機あり: alpha=0.5 程度なら依然として正しい収束先に到達する (発散しない)．
+    /// With speculation: for alpha around 0.5, the trajectory still reaches the correct convergence destination (without diverging).
     #[test]
     fn linear_speculation_does_not_diverge() {
         let cfg = TippingConfig {
@@ -473,15 +473,15 @@ mod tests {
         };
         let traj = cfg.integrate((90.0, 5.0));
         let last = traj.history.last().unwrap();
-        // 終点は端点近くにあること
+        // The endpoint should be near an extreme point.
         assert!(last.w > 80.0 || last.b > 40.0);
     }
 
-    /// 流速非対称: B の inflow を遅くすると，B 流入が遅延しすぎて
-    /// W に押し負けて all_white に向かう傾向が強まる (極端なケース)．
+    /// Flow-rate asymmetry: slowing B inflow delays B entry so much that it is overwhelmed by W,
+    /// strengthening the tendency toward all_white (an extreme case).
     #[test]
     fn asymmetric_flow_changes_outcome_for_borderline_init() {
-        // 投機なし・流入 W=2.0, B=0.1 → W 圧倒的優勢
+        // No speculation; inflow W=2.0, B=0.1 → W has an overwhelming advantage.
         let cfg = TippingConfig {
             phase: fig18_phase(),
             dynamics: DynamicsConfig::default(),
@@ -495,7 +495,7 @@ mod tests {
             channeling: None,
         };
         let traj = cfg.integrate((20.0, 20.0));
-        // 中央付近の初期条件でも，W優勢の流入で all_white に向かう
+        // Even from initial conditions near the center, W-dominant inflow leads toward all_white.
         let last = traj.history.last().unwrap();
         assert!(last.w > last.b);
     }

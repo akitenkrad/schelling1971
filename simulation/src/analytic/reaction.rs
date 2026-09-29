@@ -1,14 +1,15 @@
-//! 反応曲線 (Reaction Curve)．
+//! Reaction Curve.
 //!
-//! 許容限界スケジュールを「比率→絶対数」へ変換した曲線．
-//! Schelling (1971) p.170 のパラボラ $B_W(W) = R_{\max} \cdot W \cdot (1 - W/W_{\max})$ に対応する．
+//! A curve that converts a tolerance schedule from ratios to absolute counts.
+//! Corresponds to the parabola $B_W(W) = R_{\max} \cdot W \cdot (1 - W/W_{\max})$ in Schelling (1971) p.170.
 
 use super::tolerance::ToleranceSchedule;
 
-/// 反応曲線．
+/// Reaction curve.
 ///
-/// `own = n` 人が残留しているとき，最も不寛容な残留者が許容できる「他色の最大数」
-/// $B_W(W) = W \cdot R(W)$ を表す．R(W) は [`ToleranceSchedule::marginal_tolerance`]．
+/// Represents the maximum number of the other color that the least tolerant remaining person
+/// can tolerate when `own = n` people remain: $B_W(W) = W \cdot R(W)$, where R(W) is
+/// [`ToleranceSchedule::marginal_tolerance`].
 pub struct ReactionCurve<'a> {
     pub schedule: &'a ToleranceSchedule,
 }
@@ -18,7 +19,7 @@ impl<'a> ReactionCurve<'a> {
         Self { schedule }
     }
 
-    /// $B_W(W) = W \cdot R(W)$．`own` 人残留時に許容できる他色の最大数．
+    /// $B_W(W) = W \cdot R(W)$. The maximum number of the other color that can be tolerated when `own` people remain.
     pub fn max_other(&self, own: f64) -> f64 {
         if own <= 0.0 {
             return 0.0;
@@ -26,7 +27,7 @@ impl<'a> ReactionCurve<'a> {
         own * self.schedule.marginal_tolerance(own)
     }
 
-    /// 等間隔サンプリング．`(W, B_W(W))` の点列を返す (CSV 出力用)．
+    /// Samples at equal intervals. Returns a sequence of `(W, B_W(W))` points (for CSV output).
     pub fn sample(&self, n_points: usize) -> Vec<(f64, f64)> {
         let pop_max = self.schedule.pop_max();
         if pop_max <= 0.0 || n_points == 0 {
@@ -40,7 +41,7 @@ impl<'a> ReactionCurve<'a> {
             .collect()
     }
 
-    /// 数値微分 $\frac{d B_W}{d W}$．安定性判定 (反応曲線が容量制約を横切る方向) で利用する．
+    /// Numerical derivative $\frac{d B_W}{d W}$. Used to determine stability (the direction in which the reaction curve crosses the capacity constraint).
     #[allow(dead_code)]
     pub fn derivative(&self, own: f64) -> f64 {
         let h = (self.schedule.pop_max() * 1e-6).max(1e-9);
@@ -52,8 +53,8 @@ impl<'a> ReactionCurve<'a> {
         (self.max_other(hi) - self.max_other(lo)) / (hi - lo)
     }
 
-    /// 反応曲線の頂点 (放物線の極大点) の $W$ 座標を数値的に探索する．
-    /// 連続スケジュールでは頂点は一意．
+    /// Numerically searches for the $W$ coordinate of the reaction curve's vertex (the parabola's maximum).
+    /// The vertex is unique for continuous schedules.
     pub fn peak(&self) -> (f64, f64) {
         let pop_max = self.schedule.pop_max();
         let n = 1000;
@@ -85,12 +86,12 @@ mod tests {
             pop_max: 100.0,
         };
         let rc = ReactionCurve::new(&s);
-        // 端点
+        // Endpoints
         assert!(approx(rc.max_other(0.0), 0.0, 1e-9));
         assert!(approx(rc.max_other(100.0), 0.0, 1e-9));
-        // 頂点 W = W_max/2 = 50, B_W = R_max*W_max/4 = 50
+        // Vertex W = W_max/2 = 50, B_W = R_max*W_max/4 = 50
         assert!(approx(rc.max_other(50.0), 50.0, 1e-9));
-        // 中間点
+        // Intermediate points
         assert!(approx(rc.max_other(25.0), 37.5, 1e-9));
         assert!(approx(rc.max_other(75.0), 37.5, 1e-9));
     }
@@ -114,17 +115,17 @@ mod tests {
             pop_max: 100.0,
         };
         let rc = ReactionCurve::new(&s);
-        // 上昇相 (W < 50)
+        // Ascending phase (W < 50)
         assert!(rc.derivative(25.0) > 0.0);
-        // 下降相 (W > 50)
+        // Descending phase (W > 50)
         assert!(rc.derivative(75.0) < 0.0);
-        // 頂点付近はほぼ0
+        // Approximately 0 near the vertex
         assert!(rc.derivative(50.0).abs() < 1e-3);
     }
 
     #[test]
     fn smaller_population_smaller_curve() {
-        // B 集団総数 50 のケース: peak は 25 で値 25
+        // Case with a total B population of 50: the peak is at 25 with value 25
         let s = ToleranceSchedule::Linear {
             r_max: 2.0,
             pop_max: 50.0,

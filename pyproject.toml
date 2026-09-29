@@ -11,6 +11,6 @@ members = ["tools"]
 
 [tool.uv.sources]
 schelling-tools = { workspace = true }
-# run ディレクトリの読み書きの正本は rs-runvault にある．path 依存にすると
-# 開発機のディレクトリ配置に縛られるので git 依存にする．
+# rs-runvault is the source of truth for reading and writing run directories. Use a Git
+# dependency because a path dependency would tie this project to the development machine's directory layout.
 runvault = { git = "https://github.com/akitenkrad/rs-runvault", subdirectory = "python" }

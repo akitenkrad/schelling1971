@@ -1,34 +1,35 @@
-//! 許容限界スケジュール (Tolerance Schedule)．
+//! Tolerance Schedule.
 //!
-//! 各個人の「異色比率の上限 τ」の累積分布関数 (CDF) を表す．
-//! ソート仮定 (最も不寛容な者から退出) の下で，残留人数 n から
-//! 周辺許容限界 R(n) を逆引きできる．
+//! Represents the cumulative distribution function (CDF) of each individual's
+//! "upper limit τ on the proportion of the other color."
+//! Under the sorting assumption (the least tolerant leave first), the marginal
+//! tolerance R(n) can be recovered from the number n remaining.
 
 use serde::{Deserialize, Serialize};
 
-/// 許容限界スケジュール．Schelling (1971) §3 (BNM) の許容スケジュールに対応する．
+/// Tolerance schedule. Corresponds to the tolerance schedule in Schelling (1971) §3 (BNM).
 ///
-/// CDF $F(R)$ は「許容比率が R 以下の個人の人数」を返す．
-/// すなわち $F(0) = 0$, $F(R_{\max}) = \text{pop\_max}$．
+/// The CDF $F(R)$ returns the number of individuals whose tolerance ratio is at most R.
+/// Thus, $F(0) = 0$, $F(R_{\max}) = \text{pop\_max}$.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ToleranceSchedule {
-    /// 直線型: $F(R) = (R / r_{\max}) \cdot \text{pop\_max}$, $R \in [0, r_{\max}]$．
-    /// Schelling Fig.18 の基本ケース．
+    /// Linear: $F(R) = (R / r_{\max}) \cdot \text{pop\_max}$, $R \in [0, r_{\max}]$.
+    /// The basic case in Schelling Fig.18.
     Linear { r_max: f64, pop_max: f64 },
 
-    /// アフィン型: $F(R) = \min(\text{intercept\_pop} + \text{slope} \cdot R, \text{pop\_max})$, $R \ge 0$．
-    /// 切片付き急勾配スケジュール (Fig.19) を表す．
-    /// 最大許容比率は $F(R) = \text{pop\_max}$ を満たす最小の R で決まる．
+    /// Affine: $F(R) = \min(\text{intercept\_pop} + \text{slope} \cdot R, \text{pop\_max})$, $R \ge 0$.
+    /// Represents a steep schedule with an intercept (Fig.19).
+    /// The maximum tolerance ratio is the smallest R satisfying $F(R) = \text{pop\_max}$.
     Affine {
         intercept_pop: f64,
         slope: f64,
         pop_max: f64,
     },
 
-    /// 区分線形: 任意の $(R_i, F(R_i))$ 点列で指定する．
-    /// 点列は R で単調増加，F(R) でも単調非減少でなければならない．
-    /// $R < R_0$ では $F = 0$，$R > R_n$ では $F = \text{pop\_max}$ にクリップする．
+    /// Piecewise linear: specified by an arbitrary sequence of $(R_i, F(R_i))$ points.
+    /// The points must be monotonically increasing in R and nondecreasing in F(R).
+    /// Clips to $F = 0$ for $R < R_0$ and to $F = \text{pop\_max}$ for $R > R_n$.
     PiecewiseLinear {
         points: Vec<(f64, f64)>,
         pop_max: f64,
@@ -36,7 +37,7 @@ pub enum ToleranceSchedule {
 }
 
 impl ToleranceSchedule {
-    /// 集団総数 $\text{pop\_max}$ を返す．
+    /// Returns the total population $\text{pop\_max}$.
     pub fn pop_max(&self) -> f64 {
         match *self {
             ToleranceSchedule::Linear { pop_max, .. } => pop_max,
@@ -45,9 +46,9 @@ impl ToleranceSchedule {
         }
     }
 
-    /// 累積分布 $F(R)$．許容限界が $R$ 以下の個人の人数を返す．
-    /// $R < 0$ では 0 にクリップ．切片付き Affine では $F(0) = \text{intercept\_pop}$ で
-    /// 「ゼロ許容者」の存在を表現できる．
+    /// Cumulative distribution $F(R)$. Returns the number of individuals whose tolerance limit is at most $R$.
+    /// Clips to 0 for $R < 0$. An Affine schedule with an intercept can represent the
+    /// presence of "zero-tolerance individuals" with $F(0) = \text{intercept\_pop}$.
     pub fn cdf(&self, r: f64) -> f64 {
         match self {
             ToleranceSchedule::Linear { r_max, pop_max } => {
@@ -98,29 +99,29 @@ impl ToleranceSchedule {
         }
     }
 
-    /// ソート仮定の下で，$n$ 人が残留しているときの周辺許容限界 $R(n)$．
-    /// 最も寛容な者から残るので，残留者のうち最も不寛容な者の許容限界は
-    /// $F(R(n)) = \text{pop\_max} - n$ を満たす．
+    /// Marginal tolerance $R(n)$ when $n$ people remain under the sorting assumption.
+    /// Because the most tolerant people remain, the tolerance limit of the least tolerant
+    /// person among those remaining satisfies $F(R(n)) = \text{pop\_max} - n$.
     ///
-    /// $n = 0$ のとき (誰も居ない) は $R = 0$ を返す．
-    /// $n \ge \text{pop\_max}$ のとき (全員居る) は $F^{-1}(0) = 0$ を返す．
+    /// Returns $R = 0$ when $n = 0$ (no one is present).
+    /// Returns $F^{-1}(0) = 0$ when $n \ge \text{pop\_max}$ (everyone is present).
     pub fn marginal_tolerance(&self, n: f64) -> f64 {
         let pop_max = self.pop_max();
         if n <= 0.0 {
-            // 誰も残っていなければ，「次に入る最も不寛容な者」の許容限界は最大 (R_max)
-            // ただし全員退出済みは別の意味なので，BNM では n=0 の点は端点として扱う．
-            // ここでは流入向けに最寛容者の許容限界を返すのが自然．
+            // If no one remains, the tolerance limit of the "least tolerant next entrant" is the maximum (R_max)
+            // However, because complete exit has a different meaning, the BNM treats n=0 as an endpoint.
+            // Returning the most tolerant person's tolerance limit is natural here for inflow.
             return self.r_max_finite();
         }
         if n >= pop_max {
             return 0.0;
         }
-        let target = pop_max - n; // F(R) = pop_max - n を満たす R
+        let target = pop_max - n; // R satisfying F(R) = pop_max - n
         self.invert_cdf(target)
     }
 
-    /// 数値的に意味のある最大許容比率を返す．
-    /// Linear/Affine では具体値，PiecewiseLinear では最大点の R．
+    /// Returns the numerically meaningful maximum tolerance ratio.
+    /// A concrete value for Linear/Affine, and the R at the maximum point for PiecewiseLinear.
     fn r_max_finite(&self) -> f64 {
         match self {
             ToleranceSchedule::Linear { r_max, .. } => *r_max,
@@ -140,8 +141,8 @@ impl ToleranceSchedule {
         }
     }
 
-    /// $F(R) = \text{target}$ を満たす最小の $R$ を返す (CDF の逆関数)．
-    /// $\text{target} \le 0$ なら 0，$\text{target} \ge \text{pop\_max}$ なら $r\_max\_finite$．
+    /// Returns the smallest $R$ satisfying $F(R) = \text{target}$ (the inverse CDF).
+    /// Returns 0 if $\text{target} \le 0$, and $r\_max\_finite$ if $\text{target} \ge \text{pop\_max}$.
     fn invert_cdf(&self, target: f64) -> f64 {
         let pop_max = self.pop_max();
         if target <= 0.0 {
@@ -182,7 +183,7 @@ impl ToleranceSchedule {
         }
     }
 
-    /// CDF をサンプリングして $(R, F(R))$ の点列を返す (CSV 出力用)．
+    /// Samples the CDF and returns a sequence of $(R, F(R))$ points (for CSV output).
     pub fn sample(&self, n_points: usize) -> Vec<(f64, f64)> {
         let r_max = self.r_max_finite();
         if r_max <= 0.0 || n_points == 0 {
@@ -196,7 +197,7 @@ impl ToleranceSchedule {
             .collect()
     }
 
-    /// CLI/ログ出力用のラベル．
+    /// Label for CLI/log output.
     pub fn label(&self) -> String {
         match self {
             ToleranceSchedule::Linear { r_max, pop_max } => {
@@ -239,7 +240,7 @@ mod tests {
         assert!(approx(s.cdf(0.0), 0.0, 1e-9));
         assert!(approx(s.cdf(1.0), 50.0, 1e-9));
         assert!(approx(s.cdf(2.0), 100.0, 1e-9));
-        assert!(approx(s.cdf(3.0), 100.0, 1e-9)); // クリップ
+        assert!(approx(s.cdf(3.0), 100.0, 1e-9)); // Clipped
     }
 
     #[test]
@@ -272,7 +273,7 @@ mod tests {
 
     #[test]
     fn piecewise_linear_interpolation() {
-        // 中央で折れ曲がる例: (0,0)-(1,30)-(2,100)
+        // Example with a bend in the middle: (0,0)-(1,30)-(2,100)
         let s = ToleranceSchedule::PiecewiseLinear {
             points: vec![(0.0, 0.0), (1.0, 30.0), (2.0, 100.0)],
             pop_max: 100.0,

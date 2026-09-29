@@ -1,23 +1,23 @@
 use serde::Serialize;
 
-/// セルの状態(集団 A / 集団 B / 空き)．
+/// Cell state (group A / group B / vacant).
 ///
-/// 空間構造そのものは `socsim_grid::{Grid, GridIndex}` が担い，本 enum は
-/// 「どの集団に属するか」と CSV 出力用の整数マッピングのみを表現する．
-/// 空きセルは `GridIndex` の占有マップに存在しないことで表され，色マップ
-/// (`SchellingWorld::colors`)にも現れない．
+/// The spatial structure itself is provided by `socsim_grid::{Grid, GridIndex}`; this enum
+/// represents only group membership and the integer mapping for CSV output.
+/// A vacant cell is represented by its absence from the `GridIndex` occupancy map and
+/// does not appear in the color map (`SchellingWorld::colors`) either.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize)]
 pub enum Cell {
-    /// 集団A (論文中の星 `*`)
+    /// Group A (asterisk `*` in the paper)
     GroupA,
-    /// 集団B (論文中の丸 `O`)
+    /// Group B (circle `O` in the paper)
     GroupB,
-    /// 空きセル
+    /// Vacant cell
     Empty,
 }
 
 impl Cell {
-    /// CSV出力用の整数値に変換する (0=空, 1=A, 2=B)
+    /// Converts to an integer value for CSV output (0=vacant, 1=A, 2=B)
     pub fn to_int(self) -> u8 {
         match self {
             Cell::Empty => 0,

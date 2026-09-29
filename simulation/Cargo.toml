@@ -15,12 +15,12 @@ clap        = { version = "4.5", features = ["derive"] }
 chrono      = "0.4"
 serde_json  = "1.0"
 
-# social-simulation framework (socsim) — グリッド ABM のエンジン基盤．
-# git 依存．具体的な commit は Cargo.lock で固定される．
+# social-simulation framework (socsim) — engine foundation for grid ABMs.
+# Git dependency. The specific commit is pinned in Cargo.lock.
 socsim-core   = { git = "https://github.com/akitenkrad/rs-social-simulation-tools", branch = "main", package = "socsim-core" }
 socsim-engine = { git = "https://github.com/akitenkrad/rs-social-simulation-tools", branch = "main", package = "socsim-engine" }
 socsim-grid   = { git = "https://github.com/akitenkrad/rs-social-simulation-tools", branch = "main", package = "socsim-grid" }
 
-# runvault — 実験記録基盤．run ディレクトリ・config.json・metrics.csv・manifest を持つ．
-# git 依存．具体的な commit は Cargo.lock で固定される．
+# runvault — experiment-recording foundation containing the run directory, config.json, metrics.csv, and manifest.
+# Git dependency. The specific commit is pinned in Cargo.lock.
 runvault = { git = "https://github.com/akitenkrad/rs-runvault", branch = "main" }

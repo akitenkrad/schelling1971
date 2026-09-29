@@ -1,17 +1,19 @@
-"""schelling-tools show-experiment-settings — 実験設定値の表示．
+"""schelling-tools show-experiment-settings — Display experiment settings.
 
-2 つの表示モードを持つ:
+This command has two display modes:
 
-1. 論文再現実験定義の表示 (デフォルト)
-   `reproduce_paper.py` の `paper_experiments()` で定義された Fig.7-17 の実験設定と
-   論文報告値の参照範囲を表形式で表示する．`reproduce` 実行前のプレビュー用．
+1. Display paper reproduction experiment definitions (default)
+   Displays the settings for the Fig.7-17 experiments defined by
+   `paper_experiments()` in `reproduce_paper.py`, along with the reference
+   ranges reported in the paper. This provides a preview before running `reproduce`.
 
-2. 既存実行結果の設定表示 (`--results-dir <path>`)
-   runvault の run ディレクトリの config.json (封筒．条件は `parameters` の下) を読み，
-   実行時に使われた全パラメータを表示する．run か sweep かは run.json の subcommand で
-   判別する．legacy の flat な config.json / sweep_config.json も読める．
+2. Display settings for existing results (`--results-dir <path>`)
+   Reads config.json from a runvault run directory (an envelope whose conditions
+   are under `parameters`) and displays all parameters used for the run. Whether
+   it is a run or sweep is determined from subcommand in run.json. Legacy flat
+   config.json and sweep_config.json files are also supported.
 
-   run ディレクトリのパスは次で取れる:
+   The run directory path can be obtained as follows:
        runvault path --experiment schelling --latest --subcommand run
        runvault path --experiment schelling --latest --subcommand sweep
 
@@ -41,7 +43,7 @@ from schelling_tools.reproduce_paper import (
 
 
 # ---------------------------------------------------------------------------
-# 1. 論文実験定義の表示
+# 1. Display paper experiment definitions
 # ---------------------------------------------------------------------------
 
 
@@ -67,17 +69,17 @@ def _agents_label(exp: Experiment) -> str:
 def render_paper_experiments(exps: list[Experiment]) -> str:
     lines: list[str] = []
     lines.append("=" * 90)
-    lines.append("Schelling (1971) 論文再現実験 — 設定値一覧")
+    lines.append("Schelling (1971) paper reproduction experiments — settings")
     lines.append("=" * 90)
     for i, exp in enumerate(exps):
         if i > 0:
             lines.append("-" * 90)
         lines.append(f"[{exp.key}]  {exp.figure}")
-        lines.append(f"    説明        : {exp.description}")
-        lines.append(f"    ルール      : {exp.rule_label()}")
-        lines.append(f"    グリッド    : {exp.rows}×{exp.cols} (空き率 {exp.vacant_rate:.2f})")
-        lines.append(f"    エージェント: {_agents_label(exp)}")
-        lines.append(f"    論文報告値:")
+        lines.append(f"    description    : {exp.description}")
+        lines.append(f"    rule           : {exp.rule_label()}")
+        lines.append(f"    grid           : {exp.rows}×{exp.cols} (vacant rate {exp.vacant_rate:.2f})")
+        lines.append(f"    agents         : {_agents_label(exp)}")
+        lines.append(f"    reported values:")
         lines.append(f"      avg_same_ratio   : {_format_range(exp.paper_avg_same_ratio)}")
         lines.append(f"      pct_no_opposite  : {_format_range(exp.paper_pct_no_opposite, unit='%')}")
         if exp.paper_minority_avg_same is not None:
@@ -85,14 +87,14 @@ def render_paper_experiments(exps: list[Experiment]) -> str:
     lines.append("-" * 90)
     taus = tau_sweep_taus()
     lines.append(
-        f"[fig14_tau_sweep]  Fig. 14 — τ感度解析 ({taus[0]:.2f}–{taus[-1]:.2f}, 0.05 刻み, {len(taus)} 点)"
+        f"[fig14_tau_sweep]  Fig. 14 — τ sensitivity analysis ({taus[0]:.2f}–{taus[-1]:.2f}, increments of 0.05, {len(taus)} points)"
     )
     lines.append("=" * 90)
     return "\n".join(lines)
 
 
 def experiments_as_dicts(exps: list[Experiment]) -> list[dict]:
-    """JSON 出力用に Experiment を dict に変換する．"""
+    """Convert Experiment instances to dictionaries for JSON output."""
     out: list[dict] = []
     for exp in exps:
         d = asdict(exp)
@@ -103,16 +105,16 @@ def experiments_as_dicts(exps: list[Experiment]) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# 2. 実行結果ディレクトリの設定表示
+# 2. Display settings from a results directory
 # ---------------------------------------------------------------------------
 
 
 def _resolve_results_dir(arg: str) -> Path:
-    """ユーザ指定の results_dir を絶対パスに解決する．
+    """Resolve a user-specified results_dir to an absolute path.
 
-    - 絶対パスならそのまま
-    - 相対パスは PROJECT_ROOT 起点で解決し，存在しなければ CWD 起点でも試す
-    - シンボリックリンク (results/latest) は os.path.realpath で実体を解決
+    - Leave an absolute path unchanged.
+    - Resolve a relative path from PROJECT_ROOT; if it does not exist, also try CWD.
+    - Resolve symbolic links (results/latest) to their targets with os.path.realpath.
     """
     p = Path(arg)
     if not p.is_absolute():
@@ -127,21 +129,22 @@ def _resolve_results_dir(arg: str) -> Path:
 
 
 def _load_config(results_dir: Path) -> tuple[dict, Path, str]:
-    """run ディレクトリの実験条件と，それが run のものか sweep のものかを返す．
+    """Return the experiment conditions and whether the directory is a run or sweep.
 
-    runvault の run では config.json は封筒で，条件は `parameters` の下にある．
-    run か sweep かは run.json の `subcommand` が答える (`sweep_config.json` は
-    もう書かれない)．legacy の flat な config.json / sweep_config.json も読む．
+    In a runvault run, config.json is an envelope with conditions under `parameters`.
+    The `subcommand` in run.json identifies a run or sweep (`sweep_config.json` is
+    no longer written). Legacy flat config.json and sweep_config.json files are
+    also supported.
     """
-    # 設定が無いことは «まだ sweep_config.json の方かもしれない» という意味なので，
-    # ここでは欠落を失敗として扱わない (下で sweep_config.json を見る)．
+    # Missing settings may mean that sweep_config.json is still in use, so do not
+    # treat their absence as an error here (sweep_config.json is checked below).
     params = config_parameters(results_dir, required=False)
     if params is not None:
         meta = load_run_meta(results_dir, required=False)
         if meta is not None:
             kind = "sweep" if meta.get("subcommand") == "sweep" else "run"
         else:
-            # legacy: 自前で書いていた config.json は "command" を持つ
+            # Legacy: the formerly hand-written config.json has a "command" field.
             kind = "sweep" if params.get("command") == "sweep" else "run"
         return params, results_dir / "config.json", kind
 
@@ -151,21 +154,21 @@ def _load_config(results_dir: Path) -> tuple[dict, Path, str]:
             return json.load(f), sweep_cfg, "sweep"
 
     raise FileNotFoundError(
-        f"設定ファイルが見つかりません: {results_dir}\n"
-        f"  期待されるファイル: config.json (runvault の封筒 / legacy の flat) "
-        f"または sweep_config.json (legacy の sweep)\n"
-        f"  注: 旧バージョンで生成された結果には config.json が含まれていない場合があります．"
+        f"Settings file not found: {results_dir}\n"
+        f"  Expected file: config.json (runvault envelope / legacy flat format) "
+        f"or sweep_config.json (legacy sweep)\n"
+        f"  Note: results generated by older versions may not include config.json."
     )
 
 
 def render_run_config(cfg: dict, source: Path) -> str:
     lines: list[str] = []
     lines.append("=" * 90)
-    lines.append("実行設定 (run)")
+    lines.append("Run settings")
     lines.append("=" * 90)
-    lines.append(f"設定ファイル: {source}")
+    lines.append(f"settings file: {source}")
     lines.append("-" * 90)
-    lines.append(f"ルール       : {cfg.get('rule', '-')}  (kind={cfg.get('rule_kind', '-')})")
+    lines.append(f"rule           : {cfg.get('rule', '-')}  (kind={cfg.get('rule_kind', '-')})")
     if cfg.get("threshold") is not None:
         lines.append(f"  threshold  : {cfg['threshold']}")
     if cfg.get("min_same") is not None:
@@ -175,14 +178,15 @@ def render_run_config(cfg: dict, source: Path) -> str:
     rows = cfg.get("rows", "-")
     cols = cfg.get("cols", "-")
     n_vacant = cfg.get("n_vacant", "-")
-    lines.append(f"グリッド     : {rows}×{cols} (空き {n_vacant} セル / 空き率 {cfg.get('vacant_rate', '-')})")
-    lines.append(f"エージェント : A={cfg.get('n_a', '-')}  B={cfg.get('n_b', '-')}")
-    lines.append(f"シード       : {cfg.get('seed', '-')}")
-    lines.append(f"最大反復     : {cfg.get('max_iterations', '-')}")
-    lines.append(f"snapshot間隔 : {cfg.get('snapshot_interval', '-')}")
-    # 出力先は run ディレクトリそのものなので条件には含まれない (legacy のみ持つ)．
+    lines.append(f"grid           : {rows}×{cols} ({n_vacant} vacant cells / vacant rate {cfg.get('vacant_rate', '-')})")
+    lines.append(f"agents         : A={cfg.get('n_a', '-')}  B={cfg.get('n_b', '-')}")
+    lines.append(f"seed           : {cfg.get('seed', '-')}")
+    lines.append(f"max iterations : {cfg.get('max_iterations', '-')}")
+    lines.append(f"snapshot interval: {cfg.get('snapshot_interval', '-')}")
+    # The output destination is the run directory itself, so it is not a condition
+    # (only legacy configurations include it).
     if cfg.get("output_dir") is not None:
-        lines.append(f"出力先       : {cfg['output_dir']}")
+        lines.append(f"output         : {cfg['output_dir']}")
     lines.append("=" * 90)
     return "\n".join(lines)
 
@@ -190,9 +194,9 @@ def render_run_config(cfg: dict, source: Path) -> str:
 def render_sweep_config(cfg: dict, source: Path) -> str:
     lines: list[str] = []
     lines.append("=" * 90)
-    lines.append("実行設定 (sweep)")
+    lines.append("Sweep settings")
     lines.append("=" * 90)
-    lines.append(f"設定ファイル: {source}")
+    lines.append(f"settings file: {source}")
     lines.append("-" * 90)
 
     def fmt_range(v) -> str:
@@ -202,16 +206,16 @@ def render_sweep_config(cfg: dict, source: Path) -> str:
 
     lines.append(f"threshold    : {fmt_range(cfg.get('threshold'))}")
     lines.append(f"vacant_rate  : {fmt_range(cfg.get('vacant_rate'))}")
-    lines.append(f"グリッド     : {cfg.get('rows', '-')}×{cfg.get('cols', '-')}")
-    lines.append(f"シード       : {cfg.get('seeds', '-')}")
-    lines.append(f"最大反復     : {cfg.get('max_iterations', '-')}")
-    lines.append(f"snapshot間隔 : {cfg.get('snapshot_interval', '-')}")
+    lines.append(f"grid           : {cfg.get('rows', '-')}×{cfg.get('cols', '-')}")
+    lines.append(f"seeds          : {cfg.get('seeds', '-')}")
+    lines.append(f"max iterations : {cfg.get('max_iterations', '-')}")
+    lines.append(f"snapshot interval: {cfg.get('snapshot_interval', '-')}")
     lines.append("=" * 90)
     return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
-# メイン
+# Main entry point
 # ---------------------------------------------------------------------------
 
 
@@ -225,26 +229,26 @@ def main(argv: list[str] | None = None) -> int:
         "--results-dir", "--results_dir",
         default=None,
         help=(
-            "run ディレクトリを指定し，その config.json の実験条件を表示する．"
-            "未指定時は論文再現実験定義の一覧を表示．"
+            "Specify a run directory to display the experiment conditions in its config.json."
+            "If omitted, display the paper reproduction experiment definitions."
         ),
     )
     parser.add_argument(
         "--only",
         default=None,
-        help="論文再現実験のうち指定キーのみ表示 (カンマ区切り可)．--results-dir 指定時は無視．",
+        help="Display only the specified paper reproduction experiment keys (comma-separated); ignored with --results-dir.",
     )
     parser.add_argument(
         "--json",
         action="store_true",
-        help="表ではなく JSON 形式で出力する．",
+        help="Output JSON instead of a table.",
     )
     args = parser.parse_args(argv)
 
     if args.results_dir is not None:
         results_dir = _resolve_results_dir(args.results_dir)
         if not results_dir.exists():
-            print(f"エラー: ディレクトリが存在しません: {results_dir}", file=sys.stderr)
+            print(f"Error: directory does not exist: {results_dir}", file=sys.stderr)
             return 1
         cfg, cfg_path, kind = _load_config(results_dir)
         if args.json:
@@ -262,7 +266,7 @@ def main(argv: list[str] | None = None) -> int:
         wanted = {s.strip() for s in args.only.split(",")}
         exps = [e for e in exps if e.key in wanted]
         if not exps:
-            print(f"エラー: --only で指定されたキーが見つかりません: {args.only}", file=sys.stderr)
+            print(f"Error: no keys specified by --only were found: {args.only}", file=sys.stderr)
             return 1
 
     if args.json:

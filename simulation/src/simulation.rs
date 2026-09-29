@@ -15,30 +15,30 @@ use crate::mechanisms::{no_observer, DecisionObserver, SchellingMoveMechanism};
 use crate::metrics::Metrics;
 use crate::world::SchellingWorld;
 
-/// シミュレーション全体の実行結果
+/// Results of an entire simulation run.
 pub struct SimulationResult {
     pub metrics_history: Vec<Metrics>,
     pub converged: bool,
     pub final_iteration: usize,
 }
 
-// 単一の root シードから用途別の独立な決定論的 RNG ストリームを派生させるための
-// ラベル．`derive_seed(root, &[label])` で互いに無相関なシードを得る．
-/// 初期配置シャッフル用 RNG のラベル．
+// Labels for deriving independent deterministic RNG streams for specific purposes from a
+// single root seed. `derive_seed(root, &[label])` yields mutually uncorrelated seeds.
+/// Label for the RNG used to shuffle the initial placement.
 const RNG_WORLD_INIT: u64 = 0;
-/// socsim エンジン(アクティベーション順序スケジューラ)用 RNG のラベル．
+/// Label for the socsim engine RNG (activation-order scheduler).
 const RNG_ENGINE: u64 = 1;
 
-/// グリッドを乱数で初期化し，占有インデックスと色マップを構築する．
+/// Randomly initializes the grid and constructs the occupancy index and color map.
 ///
-/// 旧実装と同じく，シャッフルした位置に集団 A・B を配置したのち，占有セルを
-/// **行優先**で走査して `AgentId(0..)` を順に割り当てる(配置順ではなく位置順)．
-/// これにより決定論的な ID 割り当てが保たれる．
+/// As in the previous implementation, groups A and B are placed at shuffled positions, then
+/// occupied cells are scanned in **row-major** order to assign `AgentId(0..)` sequentially
+/// (by position rather than placement order). This preserves deterministic ID assignment.
 pub fn init_world(cfg: &Config, rng: &mut SimRng) -> (GridIndex, BTreeMap<AgentId, Cell>) {
     let total = cfg.rows * cfg.cols;
     assert!(
         cfg.n_a + cfg.n_b <= total,
-        "エージェント数 ({}) がグリッドサイズ ({}) を超えています",
+        "number of agents ({}) exceeds grid size ({})",
         cfg.n_a + cfg.n_b,
         total
     );
@@ -48,7 +48,7 @@ pub fn init_world(cfg: &Config, rng: &mut SimRng) -> (GridIndex, BTreeMap<AgentI
         .collect();
     positions.shuffle(rng);
 
-    // セル配色をいったん 2次元配列に確定させる(旧実装と同じ手順)．
+    // First finalize cell colors in a two-dimensional array (the same procedure as before).
     let mut cells = vec![vec![Cell::Empty; cfg.cols]; cfg.rows];
     for &(r, c) in positions.iter().take(cfg.n_a) {
         cells[r][c] = Cell::GroupA;
@@ -57,7 +57,7 @@ pub fn init_world(cfg: &Config, rng: &mut SimRng) -> (GridIndex, BTreeMap<AgentI
         cells[r][c] = Cell::GroupB;
     }
 
-    // 占有セルを行優先で走査し，AgentId(0..) を割り当ててインデックス・色マップへ．
+    // Scan occupied cells in row-major order, assign AgentId(0..), and populate the indexes.
     let mut index = GridIndex::new(Grid::new(cfg.rows, cfg.cols, Boundary::Fixed));
     let mut colors: BTreeMap<AgentId, Cell> = BTreeMap::new();
     let mut next_id = 0u64;
@@ -65,7 +65,9 @@ pub fn init_world(cfg: &Config, rng: &mut SimRng) -> (GridIndex, BTreeMap<AgentI
         for (c, &cell) in row.iter().enumerate() {
             if cell != Cell::Empty {
                 let id = AgentId(next_id);
-                index.place(id, r, c).expect("初期配置に失敗");
+                index
+                    .place(id, r, c)
+                    .expect("failed to place agent initially");
                 colors.insert(id, cell);
                 next_id += 1;
             }
@@ -75,38 +77,39 @@ pub fn init_world(cfg: &Config, rng: &mut SimRng) -> (GridIndex, BTreeMap<AgentI
     (index, colors)
 }
 
-/// シミュレーションを実行する．
+/// Runs the simulation.
 ///
-/// socsim フレームワークの [`Simulation`](socsim_engine::Simulation) エンジンを内部で
-/// 駆動する．移動規則は [`SchellingMoveMechanism`] が `Decision` フェーズで適用し，
-/// アクティベーション順序は [`RandomActivationScheduler`] が毎ステップ決定する．
+/// Internally drives the socsim framework's [`Simulation`](socsim_engine::Simulation) engine.
+/// [`SchellingMoveMechanism`] applies the movement rule in the `Decision` phase, and
+/// [`RandomActivationScheduler`] determines the activation order at each step.
 ///
-/// 早期停止は移動メカニズムが [`StepContext::request_stop`](socsim_core::StepContext::request_stop)
-/// で要求し，ドライバは [`Simulation::stop_requested`](socsim_engine::Simulation::stop_requested)
-/// を見てループを抜ける．ステップ結果(移動数・不満足数・収束)は
-/// [`Simulation::scratch`](socsim_engine::Simulation::scratch) 経由で受け取る．
+/// The movement mechanism requests early termination through
+/// [`StepContext::request_stop`](socsim_core::StepContext::request_stop), and the driver exits
+/// the loop after checking [`Simulation::stop_requested`](socsim_engine::Simulation::stop_requested).
+/// Step results (number moved, number dissatisfied, and convergence) are received through
+/// [`Simulation::scratch`](socsim_engine::Simulation::scratch).
 pub fn run(cfg: &Config) -> SimulationResult {
     run_observed(cfg, no_observer())
 }
 
-/// [`run`] と同じシミュレーションを行い，メカニズムがエージェント 1 体の移動を
-/// 判断するたびに `on_decision` を 1 回呼ぶ．
+/// Runs the same simulation as [`run`] and calls `on_decision` once whenever the mechanism
+/// makes a movement decision for one agent.
 ///
-/// 数える単位がステップではなく判断である理由は
-/// [`DecisionObserver`](crate::mechanisms::DecisionObserver) に書いてある．
+/// See [`DecisionObserver`](crate::mechanisms::DecisionObserver) for why decisions, rather than
+/// steps, are counted.
 pub fn run_observed(cfg: &Config, on_decision: DecisionObserver) -> SimulationResult {
-    // 出力ディレクトリの準備
+    // Prepare the output directory.
     let snapshots_dir = format!("{}/snapshots", cfg.output_dir);
-    fs::create_dir_all(&snapshots_dir).expect("スナップショットディレクトリの作成に失敗");
+    fs::create_dir_all(&snapshots_dir).expect("failed to create snapshot directory");
 
-    // 乱数シード(未指定ならランダム)．単一 root から用途別シードを派生させる．
+    // Choose the random seed (random if unspecified) and derive purpose-specific seeds from it.
     let root = cfg.seed.unwrap_or_else(rand::random);
 
-    // グリッド初期化(配置シャッフル用の RNG．root から派生)．
+    // Initialize the grid (using the placement-shuffle RNG derived from the root).
     let mut init_rng = SimRng::from_seed(derive_seed(root, &[RNG_WORLD_INIT]));
     let (index, colors) = init_world(cfg, &mut init_rng);
 
-    // 世界状態とエンジンを構築(エンジン RNG も root から別ラベルで派生)．
+    // Build the world state and engine (with an engine RNG derived under a separate label).
     let world = SchellingWorld::with_modes(
         index,
         colors,
@@ -121,24 +124,24 @@ pub fn run_observed(cfg: &Config, on_decision: DecisionObserver) -> SimulationRe
         .add_mechanism(Box::new(SchellingMoveMechanism::new(on_decision)))
         .build();
 
-    // メトリクス履歴
+    // Metrics history.
     let mut metrics_history: Vec<Metrics> = Vec::new();
 
-    // 初期状態(step 0)を記録・保存
+    // Record and save the initial state (step 0).
     metrics_history.push(Metrics::compute(sim.world(), 0, 0, 0));
     if cfg.snapshot_interval > 0 {
         save_snapshot(sim.world(), 0, &snapshots_dir);
     }
 
-    // socsim エンジンの観測付き実行ループ．`run_observed` は
+    // Observed execution loop for the socsim engine. `run_observed`
     // `while !clock.is_done() && !stop_requested { step(); observe(report); if stop break }`
-    // を回し，停止要求を出したステップを含めて観測を 1 回ずつ呼ぶ．これは旧来の
-    // 手書きループ(step → scratch 読み → stop_requested で break)と同一のステップ数・
-    // RNG 使用・観測タイミングを持つ．
+    // runs the loop and invokes the observer once per step, including the step that requested
+    // termination. This preserves the step count, RNG use, and observation timing of the former
+    // handwritten loop (step -> read scratch -> break on stop_requested).
     //
-    // 収束フラグと最終反復は停止ステップ(または最終ステップ)の値で確定させたいので，
-    // クロージャ外の可変変数に毎ステップ上書きしていく(`report.t` は step 後のクロック
-    // = 1始まりの反復番号で，旧ループの `iteration` と一致)．
+    // To finalize the convergence flag and final iteration from the stopping step (or last step),
+    // overwrite mutable variables outside the closure on every step (`report.t` is the clock after
+    // the step, i.e. the one-based iteration number, matching `iteration` in the former loop).
     let mut converged = false;
     let mut final_iteration = cfg.max_iterations;
     sim.run_observed(|report| {
@@ -147,17 +150,17 @@ pub fn run_observed(cfg: &Config, on_decision: DecisionObserver) -> SimulationRe
         let n_dissatisfied = *report
             .scratch
             .get::<usize>("n_dissatisfied")
-            .expect("n_dissatisfied が scratch に存在しません");
+            .expect("n_dissatisfied is missing from scratch data");
         let n_moved = *report
             .scratch
             .get::<usize>("n_moved")
-            .expect("n_moved が scratch に存在しません");
+            .expect("n_moved is missing from scratch data");
         let step_converged = *report
             .scratch
             .get::<bool>("converged")
-            .expect("converged が scratch に存在しません");
+            .expect("converged is missing from scratch data");
 
-        // メトリクスを記録
+        // Record metrics.
         metrics_history.push(Metrics::compute(
             report.world,
             iteration,
@@ -165,16 +168,16 @@ pub fn run_observed(cfg: &Config, on_decision: DecisionObserver) -> SimulationRe
             n_moved,
         ));
 
-        // スナップショットを保存
+        // Save a snapshot.
         if cfg.snapshot_interval > 0 && iteration.is_multiple_of(cfg.snapshot_interval) {
             save_snapshot(report.world, iteration, &snapshots_dir);
         }
 
-        // 各ステップの収束フラグ・反復番号を保持(停止/最終ステップの値が最終的に残る)．
+        // Retain each step's convergence flag and iteration number; the stopping/final values remain.
         converged = step_converged;
         final_iteration = iteration;
     })
-    .expect("シミュレーションの実行に失敗");
+    .expect("simulation failed");
 
     SimulationResult {
         metrics_history,
@@ -183,14 +186,14 @@ pub fn run_observed(cfg: &Config, on_decision: DecisionObserver) -> SimulationRe
     }
 }
 
-/// グリッドスナップショットをCSVに保存する
-/// フォーマット: row,col,cell  (cell: 0=空, 1=A, 2=B)
+/// Saves a grid snapshot as CSV.
+/// Format: row,col,cell  (cell: 0=empty, 1=A, 2=B)
 pub fn save_snapshot(world: &SchellingWorld, step: usize, dir: &str) {
     let path = format!("{}/step_{:05}.csv", dir, step);
-    let file = File::create(&path).expect("スナップショットファイルの作成に失敗");
+    let file = File::create(&path).expect("failed to create snapshot file");
     let mut wtr = Writer::from_writer(BufWriter::new(file));
     wtr.write_record(["row", "col", "cell"])
-        .expect("ヘッダ書き込みに失敗");
+        .expect("failed to write header");
     for r in 0..world.rows() {
         for c in 0..world.cols() {
             wtr.write_record(&[
@@ -198,10 +201,10 @@ pub fn save_snapshot(world: &SchellingWorld, step: usize, dir: &str) {
                 c.to_string(),
                 world.cell_color(r, c).to_int().to_string(),
             ])
-            .expect("レコード書き込みに失敗");
+            .expect("failed to write record");
         }
     }
-    wtr.flush().expect("フラッシュに失敗");
+    wtr.flush().expect("failed to flush writer");
 }
 
 #[cfg(test)]
@@ -210,7 +213,7 @@ mod tests {
     use crate::config::{MoveMode, MoveStrategy, SatisfactionRule};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    /// テスト用に一意な出力ディレクトリを払い出す．
+    /// Allocates a unique output directory for a test.
     fn temp_output_dir() -> String {
         static N: AtomicUsize = AtomicUsize::new(0);
         let n = N.fetch_add(1, Ordering::Relaxed);
@@ -237,7 +240,7 @@ mod tests {
             move_strategy: MoveStrategy::Nearest,
             max_iterations: 200,
             seed: Some(42),
-            snapshot_interval: 0, // I/O を抑える
+            snapshot_interval: 0, // Minimize I/O.
             output_dir,
         }
     }
@@ -249,7 +252,7 @@ mod tests {
         }
     }
 
-    /// 不等数 (2:1) で少数派 (B) のクラスタ比率を測るための設定．
+    /// Configuration for measuring the minority (B) cluster ratio with unequal numbers (2:1).
     fn unequal_config(output_dir: String, strategy: MoveStrategy) -> Config {
         Config {
             n_a: 97,
@@ -262,7 +265,7 @@ mod tests {
         }
     }
 
-    /// 同一シードなら socsim エンジン経由でも結果が完全に再現する．
+    /// The same seed produces identical results even through the socsim engine.
     #[test]
     fn same_seed_is_deterministic() {
         let a = run(&test_config(temp_output_dir()));
@@ -277,7 +280,8 @@ mod tests {
         }
     }
 
-    /// 旧実装のセマンティクス (緩運用): 各ステップの移動数は開始時不満足数以下．
+    /// Previous implementation semantics (standard mode): moves per step do not exceed the
+    /// number dissatisfied at the start of the step.
     #[test]
     fn moved_never_exceeds_dissatisfied() {
         let result = run(&test_config(temp_output_dir()));
@@ -292,7 +296,7 @@ mod tests {
         }
     }
 
-    /// 厳格運用 (Fig.8) も同一シードで完全に再現する．
+    /// Strict mode (Fig.8) is also fully reproducible with the same seed.
     #[test]
     fn strict_mode_is_deterministic() {
         let a = run(&strict_config(temp_output_dir()));
@@ -306,9 +310,10 @@ mod tests {
         }
     }
 
-    /// 厳格運用は満足者も投機的に移動するため，緩運用より分離度 (平均同色比率) が
-    /// 高くなる(論文 Fig.8 が Fig.9 より分離が進む現象に対応)．また停止後は誰も
-    /// 同色比率を改善できない安定状態にある．
+    /// Because satisfied agents also move speculatively in strict mode, segregation (mean
+    /// same-color ratio) is higher than in standard mode, corresponding to the paper's stronger
+    /// segregation in Fig.8 than in Fig.9. After stopping, the state is stable: no agent can
+    /// improve its same-color ratio.
     #[test]
     fn strict_mode_segregates_more_than_standard() {
         let standard = run(&test_config(temp_output_dir()));
@@ -323,8 +328,9 @@ mod tests {
         );
     }
 
-    /// 厳格運用では投機移動により `n_moved > n_dissatisfied` のステップが生じうる
-    /// (満足者の移動が含まれるため)．緩運用の不等式とは別のセマンティクス．
+    /// In strict mode, speculative moves can produce steps where
+    /// `n_moved > n_dissatisfied` because moves by satisfied agents are included. These semantics
+    /// differ from the inequality in standard mode.
     #[test]
     fn strict_mode_allows_speculative_moves() {
         let result = run(&strict_config(temp_output_dir()));
@@ -338,7 +344,7 @@ mod tests {
         );
     }
 
-    /// BestLocal 戦略も同一シードで完全に再現する．
+    /// The BestLocal strategy is also fully reproducible with the same seed.
     #[test]
     fn best_local_is_deterministic() {
         let a = run(&unequal_config(temp_output_dir(), MoveStrategy::BestLocal));
@@ -350,8 +356,8 @@ mod tests {
         }
     }
 
-    /// 不等数 (Fig.12) で BestLocal 戦略は少数派 (B) の同色比率を Nearest 戦略以上に
-    /// 高める(より同質な区画へ寄り集まるため)．
+    /// With unequal numbers (Fig.12), BestLocal raises the minority (B) same-color ratio at least
+    /// as much as Nearest by clustering agents in more homogeneous areas.
     #[test]
     fn best_local_improves_minority_clustering() {
         let nearest = run(&unequal_config(temp_output_dir(), MoveStrategy::Nearest));
